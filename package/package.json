@@ -1,0 +1,59 @@
+{
+	"name": "bachs-sdk",
+	"version": "1.1.0",
+	"description": "Unofficial Typesafe TypeScript SDK for Bachs.io",
+	"main": "dist/index.cjs",
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"type": "module",
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "tsup && tsc --emitDeclarationOnly",
+		"dev": "tsup --watch",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"format:check": "biome format .",
+		"check": "biome check --write .",
+		"changeset": "changeset",
+		"version": "changeset version",
+		"release": "npm run build && changeset publish"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		}
+	},
+	"keywords": [
+		"bachs",
+		"sdk",
+		"api",
+		"payments",
+		"typescript"
+	],
+	"author": "Prince Gbalam",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/princecodes247/bachs-sdk-node.git"
+	},
+	"files": [
+		"dist",
+		"src",
+		"README.md"
+	],
+	"devDependencies": {
+		"@biomejs/biome": "2.5.7",
+		"@changesets/cli": "^2.31.1",
+		"@types/node": "^20.0.0",
+		"tsup": "^8.0.0",
+		"typescript": "^5.0.0",
+		"vitest": "^1.0.0"
+	}
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Meridian China Advisory",
+  "description": "Strategic bilateral trade facilitation, Canton Fair delegation advisory, supplier audit, and structured NGN/RMB cross-border consultations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

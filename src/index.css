@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Inter', sans-serif;
+
+  --color-surface: #f8faff;
+  --color-surface-dim: #cbdbf5;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f1f5fd;
+  --color-surface-container: #e6eeff;
+  --color-surface-container-high: #dbe7fc;
+  --color-surface-container-highest: #d0e0fb;
+  
+  --color-on-surface: #0b1c30;
+  --color-on-surface-variant: #475569;
+  --color-inverse-surface: #1e293b;
+  --color-inverse-on-surface: #f8fafc;
+  
+  --color-primary: #0f172a;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #1e293b;
+  --color-on-primary-container: #94a3b8;
+  --color-primary-fixed: #e2e8f0;
+  --color-primary-fixed-dim: #cbd5e1;
+  
+  --color-secondary: #1d4ed8;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #3b82f6;
+  --color-on-secondary-container: #eff6ff;
+  --color-secondary-fixed: #dbeafe;
+  --color-secondary-fixed-dim: #bfdbfe;
+  
+  --color-tertiary: #047857;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #064e3b;
+  --color-on-tertiary-container: #059669;
+  --color-tertiary-fixed: #a7f3d0;
+  --color-tertiary-fixed-dim: #6ee7b7;
+  --color-on-tertiary-fixed: #022c22;
+  
+  --color-outline: #94a3b8;
+  --color-outline-variant: #e2e8f0;
+  
+  --color-error: #dc2626;
+  --color-error-container: #fee2e2;
+  --color-on-error-container: #991b1b;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-surface);
+    color: var(--color-on-surface);
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Fallback & compatibility helper classes for smooth spacing */
+@layer utilities {
+  .gap-space-2xs { gap: 0.25rem; }
+  .gap-space-xs { gap: 0.5rem; }
+  .gap-space-sm { gap: 0.75rem; }
+  .gap-space-md { gap: 1rem; }
+  .gap-space-lg { gap: 1.5rem; }
+  .gap-space-xl { gap: 2rem; }
+  .gap-space-2xl { gap: 3rem; }
+  .gap-space-3xl { gap: 4rem; }
+
+  .p-space-2xs { padding: 0.25rem; }
+  .p-space-xs { padding: 0.5rem; }
+  .p-space-sm { padding: 0.75rem; }
+  .p-space-md { padding: 1rem; }
+  .p-space-lg { padding: 1.5rem; }
+  .p-space-xl { padding: 2rem; }
+  .p-space-2xl { padding: 3rem; }
+
+  .py-space-2xs { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  .py-space-xs { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+  .py-space-sm { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+  .py-space-md { padding-top: 1rem; padding-bottom: 1rem; }
+  .py-space-lg { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+  .py-space-xl { padding-top: 2rem; padding-bottom: 2rem; }
+  .py-space-2xl { padding-top: 3rem; padding-bottom: 3rem; }
+  .py-space-3xl { padding-top: 4rem; padding-bottom: 4rem; }
+
+  .pt-space-xs { padding-top: 0.5rem; }
+  .pt-space-sm { padding-top: 0.75rem; }
+  .pt-space-md { padding-top: 1rem; }
+  .pt-space-lg { padding-top: 1.5rem; }
+  .pt-space-xl { padding-top: 2rem; }
+  .pt-space-2xl { padding-top: 3rem; }
+
+  .pb-space-xs { padding-bottom: 0.5rem; }
+  .pb-space-sm { padding-bottom: 0.75rem; }
+  .pb-space-md { padding-bottom: 1rem; }
+  .pb-space-lg { padding-bottom: 1.5rem; }
+  .pb-space-xl { padding-bottom: 2rem; }
+  .pb-space-2xl { padding-bottom: 3rem; }
+  .pb-space-3xl { padding-bottom: 4rem; }
+
+  .px-space-xs { padding-left: 0.5rem; padding-right: 0.5rem; }
+  .px-space-sm { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .px-space-md { padding-left: 1rem; padding-right: 1rem; }
+  .px-space-lg { padding-left: 1.5rem; padding-right: 1.5rem; }
+  .px-space-xl { padding-left: 2rem; padding-right: 2rem; }
+
+  .p-card-pad-mobile { padding: 1.25rem; }
+  .px-screen-edge-mobile { padding-left: 1rem; padding-right: 1rem; }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+}
+
+/* Custom typography classes */
+.font-display-lg-mobile {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 2.25rem;
+  line-height: 2.75rem;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+@media (min-width: 640px) {
+  .font-display-lg-mobile {
+    font-size: 2.75rem;
+    line-height: 3.25rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .font-display-lg-mobile {
+    font-size: 3.25rem;
+    line-height: 3.75rem;
+  }
+}
+
+.font-headline-lg {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 1.75rem;
+  line-height: 2.25rem;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+@media (min-width: 640px) {
+  .font-headline-lg {
+    font-size: 2.125rem;
+    line-height: 2.625rem;
+  }
+}
+
+.font-headline-sm {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  letter-spacing: -0.015em;
+  font-weight: 600;
+}
+
+@media (min-width: 640px) {
+  .font-headline-sm {
+    font-size: 1.375rem;
+    line-height: 1.875rem;
+  }
+}
+
+.font-title-md {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.5rem;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.font-body-md {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.9375rem;
+  line-height: 1.5rem;
+  font-weight: 400;
+}
+
+@media (min-width: 640px) {
+  .font-body-md {
+    font-size: 1rem;
+    line-height: 1.625rem;
+  }
+}
+
+.font-body-sm {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+}
+
+.font-label-md {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  letter-spacing: 0.01em;
+  font-weight: 600;
+}
+
+.font-label-sm {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+}
+
