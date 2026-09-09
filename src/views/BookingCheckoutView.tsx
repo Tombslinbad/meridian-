@@ -119,9 +119,15 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
   // Fetch Bachs status on mount
   useEffect(() => {
     fetch('/api/payments/bachs/config')
-      .then((res) => res.json())
+      .then(async (res) => {
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          return res.json();
+        }
+        return null;
+      })
       .then((data) => {
-        setBachsConfig(data);
+        if (data) setBachsConfig(data);
       })
       .catch((err) => {
         console.warn('Could not load Bachs config:', err);
@@ -140,6 +146,10 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
       if (isManual) setIsVerifyingManual(true);
       try {
         const res = await fetch(`/api/payments/bachs/verify-checkout/${checkoutId}`);
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          return false;
+        }
         const data = await res.json();
         if (data && data.isSucceeded) {
           if (pollingTimerRef.current) {
@@ -262,7 +272,20 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      let data: any;
+
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const rawText = await res.text();
+        if (res.status === 404 || rawText.includes('The page could not be found') || rawText.includes('<!DOCTYPE html>')) {
+          throw new Error(
+            'Payment API route not found (404). If deployed on Vercel, ensure the /api serverless function is deployed with vercel.json and BACHS_API_KEY is configured in Vercel Environment Variables.'
+          );
+        }
+        throw new Error(`Server returned status ${res.status}: ${rawText.slice(0, 100)}`);
+      }
 
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Unable to generate Bachs checkout session.');
