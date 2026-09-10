@@ -1,0 +1,37 @@
+{
+  "settings": {
+    "advisorEmail": "igwev2956@gmail.com",
+    "googleCalendarIcalUrl": "",
+    "googleCalendarId": "igwev2956@gmail.com",
+    "lastSyncedAt": null,
+    "syncStatus": "unconfigured",
+    "syncMessage": "No Google Calendar iCal link configured yet",
+    "eventsCount": 0,
+    "workingHoursStart": "09:00",
+    "workingHoursEnd": "21:00",
+    "manualBlockedSlots": [],
+    "manualBlockedDates": []
+  },
+  "bookings": [
+    {
+      "id": "SEED-001",
+      "auditReference": "MCA-SAMPLE-001",
+      "fullName": "Alhaji Bashir Dangote Logistics",
+      "email": "b.dangote@sample-trade.ng",
+      "dateIso": "2026-10-13",
+      "timeSlot": "02:00 PM",
+      "status": "confirmed",
+      "createdAt": "2026-09-10T12:57:43.165Z"
+    },
+    {
+      "id": "SEED-002",
+      "auditReference": "MCA-SAMPLE-002",
+      "fullName": "Chukwudi Electronics Ltd",
+      "email": "c.electronics@sample-trade.ng",
+      "dateIso": "2026-10-15",
+      "timeSlot": "11:30 AM",
+      "status": "confirmed",
+      "createdAt": "2026-09-10T12:57:43.165Z"
+    }
+  ]
+}

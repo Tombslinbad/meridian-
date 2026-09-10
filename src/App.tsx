@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
-import { initAuth } from './services/googleWorkspace';
+import { initAuth, getDefaultMeetUrl } from './services/googleWorkspace';
 import { AppTab, BookingDetails, DiagnosticData } from './types';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -11,6 +11,7 @@ import { ConfirmationView } from './views/ConfirmationView';
 import { CantonFairView } from './views/CantonFairView';
 import { VerificationView } from './views/VerificationView';
 import { PaymentCelebrationModal } from './components/PaymentCelebrationModal';
+import { initAnalytics, trackPageView, trackViewContent, trackPurchase } from './lib/analytics';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<AppTab>('advisory');
@@ -31,9 +32,28 @@ export function App() {
     selectedTime: '11:30 AM',
     paymentChannel: 'card',
     auditReference: `MCA-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-    meetUrl: 'https://meet.google.com/mca-strategy-desk',
-    amountNgn: 50000,
+    meetUrl: getDefaultMeetUrl(),
+    amountNgn: 50750,
   });
+
+  // Initialize analytics and track page views
+  useEffect(() => {
+    initAnalytics();
+    trackPageView();
+  }, []);
+
+  useEffect(() => {
+    trackPageView(currentTab);
+    if (currentTab === 'advisory') {
+      trackViewContent();
+    }
+  }, [currentTab]);
+
+  useEffect(() => {
+    if (booking.paymentStatus === 'succeeded' && booking.bachsCheckoutId) {
+      trackPurchase(booking.bachsCheckoutId, 50000, 'NGN');
+    }
+  }, [booking.paymentStatus, booking.bachsCheckoutId]);
 
   // Diagnostic state
   const [diagnostic, setDiagnostic] = useState<DiagnosticData>({
@@ -101,12 +121,10 @@ export function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-surface text-on-surface antialiased selection:bg-secondary-fixed selection:text-secondary">
-      {/* Fixed Application Header with Brand Emblem & Google Workspace Connection */}
+      {/* Fixed Application Header with Brand Emblem & WhatsApp Desk */}
       <Header
         currentTab={currentTab}
         onNavigate={handleNavigate}
-        user={user}
-        onUserChange={setUser}
       />
 
       {/* Main Content Area */}
@@ -148,6 +166,7 @@ export function App() {
         {currentTab === 'confirmed' && (
           <ConfirmationView
             booking={booking}
+            onUpdateBooking={handleUpdateBooking}
             onNavigate={handleNavigate}
             user={user}
             onUserChange={setUser}

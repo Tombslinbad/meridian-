@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { BookingDetails } from '../types';
-import { ADVISOR_EMAIL, downloadIcsFile } from '../services/googleWorkspace';
+import {
+  ADVISOR_EMAIL,
+  ADVISOR_WHATSAPP_NUMBER,
+  ADVISOR_WHATSAPP_DISPLAY,
+  downloadIcsFile,
+  sanitizeMeetUrl
+} from '../services/googleWorkspace';
 import {
   Check,
   Calendar,
@@ -11,7 +17,8 @@ import {
   ShieldCheck,
   X,
   ArrowRight,
-  Download
+  Download,
+  MessageSquare
 } from 'lucide-react';
 
 interface PaymentCelebrationModalProps {
@@ -31,8 +38,23 @@ export const PaymentCelebrationModal: React.FC<PaymentCelebrationModalProps> = (
 
   if (!isOpen) return null;
 
+  const effectiveMeetUrl = sanitizeMeetUrl(booking.meetUrl);
+
+  const automatedWhatsAppText =
+    `Hello Meridian China Advisory Desk,\n\n` +
+    `I just completed payment and booked my 1-on-1 Bilateral Trade Consultation.\n\n` +
+    `• Booking Reference: ${booking.auditReference}\n` +
+    `• Client Name: ${booking.fullName || 'Trade Client'}\n` +
+    `• Company: ${booking.companyName || 'Private Trader'}\n` +
+    `• Sector: ${booking.industry}\n` +
+    `• Session Date: ${booking.selectedDate} at ${booking.selectedTime} (WAT)\n` +
+    `• Google Meet Room: ${effectiveMeetUrl}\n\n` +
+    `Please confirm receipt and acknowledge my session. Thank you!`;
+
+  const whatsappUrl = `https://wa.me/${ADVISOR_WHATSAPP_NUMBER}?text=${encodeURIComponent(automatedWhatsAppText)}`;
+
   const handleCopyMeet = () => {
-    navigator.clipboard.writeText(booking.meetUrl || 'https://meet.google.com/mca-strategy-desk');
+    navigator.clipboard.writeText(effectiveMeetUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
   };
@@ -78,7 +100,7 @@ export const PaymentCelebrationModal: React.FC<PaymentCelebrationModalProps> = (
         </div>
 
         {/* Exact User Wording Headlines */}
-        <div className="flex flex-col gap-2 max-w-lg mb-5">
+        <div className="flex flex-col gap-2 max-w-lg mb-4">
           <h2 className="text-xl sm:text-2xl font-bold text-on-surface tracking-tight leading-snug">
             You Have Successfully Booked Your Consultations!
           </h2>
@@ -87,8 +109,28 @@ export const PaymentCelebrationModal: React.FC<PaymentCelebrationModalProps> = (
             <span>You&apos;ll receive an email shortly to view your consultation details.</span>
           </div>
           <p className="text-xs text-on-surface-variant mt-1">
-            Official notification dispatched to <strong className="text-on-surface">{booking.email || 'your email'}</strong> and the Director desk (<span className="font-mono text-secondary">{ADVISOR_EMAIL}</span>).
+            Official notification dispatched to <strong className="text-on-surface">{booking.email || 'your email'}</strong> and the Advisor desk (<span className="font-mono text-secondary">{ADVISOR_EMAIL}</span>).
           </p>
+        </div>
+
+        {/* Automated WhatsApp Message CTA to Advisor */}
+        <div className="w-full mb-5 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col items-center gap-2.5 text-center">
+          <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 font-bold text-xs uppercase tracking-wider">
+            <MessageSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Automated WhatsApp Notification to Advisor</span>
+          </div>
+          <p className="text-xs text-on-surface-variant max-w-md">
+            Send an automated notification directly to the Advisor at <strong className="text-on-surface font-mono">{ADVISOR_WHATSAPP_DISPLAY} ({ADVISOR_WHATSAPP_NUMBER})</strong> saying you just booked a consultation.
+          </p>
+          <a
+            href={whatsappUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full sm:w-auto min-h-[44px] px-6 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-[#25D366]/20 transition-transform active:scale-98"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>Send Message to Advisor on WhatsApp</span>
+          </a>
         </div>
 
         {/* Interactive Consultation Summary Card */}
@@ -142,7 +184,7 @@ export const PaymentCelebrationModal: React.FC<PaymentCelebrationModalProps> = (
                   Your Google Meet Video Room
                 </span>
                 <span className="text-xs font-mono text-on-surface truncate max-w-[240px] sm:max-w-xs">
-                  {booking.meetUrl || 'https://meet.google.com/mca-strategy-desk'}
+                  {effectiveMeetUrl}
                 </span>
               </div>
             </div>
@@ -168,7 +210,7 @@ export const PaymentCelebrationModal: React.FC<PaymentCelebrationModalProps> = (
               </button>
 
               <a
-                href={booking.meetUrl || 'https://meet.google.com/mca-strategy-desk'}
+                href={effectiveMeetUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="px-3 py-1.5 rounded-lg bg-secondary text-white text-xs font-bold hover:bg-secondary-container flex items-center gap-1 transition-colors"
@@ -205,12 +247,12 @@ export const PaymentCelebrationModal: React.FC<PaymentCelebrationModalProps> = (
         <div className="mt-4 text-[11px] text-on-surface-variant flex items-center justify-center gap-2">
           <span>Need direct adjustments? Reach Concierge on WhatsApp:</span>
           <a
-            href="https://wa.me/23480063743426?text=Hello%20Meridian%20Desk,%20I%20just%20completed%20my%20consultation%20booking"
+            href={whatsappUrl}
             target="_blank"
             rel="noreferrer"
             className="text-secondary font-bold hover:underline"
           >
-            +234 800 MERIDIAN
+            {ADVISOR_WHATSAPP_DISPLAY} ({ADVISOR_WHATSAPP_NUMBER})
           </a>
         </div>
       </div>

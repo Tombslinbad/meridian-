@@ -22,6 +22,23 @@ export const SCOPES = [
 ];
 
 export const ADVISOR_EMAIL = 'igwev2956@gmail.com';
+export const CLIENT_SENDER_EMAIL = 'meridianadvisory@verifieduni.com';
+export const ADVISOR_NOTIFICATION_SENDER_EMAIL = 'notifications@verifieduni.com';
+export const ADVISOR_WHATSAPP_NUMBER = '2349065839680';
+export const ADVISOR_WHATSAPP_DISPLAY = '+234 906 583 9680';
+
+export const getWhatsAppConsultationUrl = (booking: BookingDetails): string => {
+  const text =
+    `Hello Meridian China Advisory Desk, I just completed payment for my 1-on-1 Consultation.\n\n` +
+    `• Reference: ${booking.auditReference}\n` +
+    `• Name: ${booking.fullName}\n` +
+    `• Company: ${booking.companyName || 'Private Trader'}\n` +
+    `• Sector: ${booking.industry}\n` +
+    `• Consultation Date: ${booking.selectedDate} at ${booking.selectedTime} (WAT)\n` +
+    `• Google Meet Room: ${booking.meetUrl}\n\n` +
+    `Please confirm receipt and acknowledge my session. Thank you!`;
+  return `https://wa.me/${ADVISOR_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
+};
 
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/calendar.events');
@@ -81,12 +98,69 @@ export const logout = async () => {
 };
 
 /**
+ * Retrieves custom advisor desk Google Meet URL from localStorage or environment variable
+ */
+export const getSavedOrEnvMeetUrl = (): string | null => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('meridian_advisor_meet_url');
+    if (saved && saved.startsWith('https://meet.google.com/')) {
+      return saved.trim();
+    }
+  }
+  const envUrl = (import.meta as any).env?.VITE_GOOGLE_MEET_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.startsWith('https://meet.google.com/')) {
+    return envUrl.trim();
+  }
+  return null;
+};
+
+/**
+ * Persists advisor custom Google Meet URL into localStorage
+ */
+export const setSavedAdvisorMeetUrl = (url: string): void => {
+  if (typeof window !== 'undefined') {
+    if (url && url.startsWith('https://meet.google.com/')) {
+      localStorage.setItem('meridian_advisor_meet_url', url.trim());
+    } else {
+      localStorage.removeItem('meridian_advisor_meet_url');
+    }
+  }
+};
+
+/**
+ * Returns a valid, working Google Meet link.
+ * Defaults to advisor's configured room or Google Meet's live instant launcher, never broken mock slugs.
+ */
+export const getDefaultMeetUrl = (): string => {
+  const configured = getSavedOrEnvMeetUrl();
+  if (configured) {
+    return configured;
+  }
+  return 'https://meet.google.com/new';
+};
+
+/**
+ * Cleanses old placeholder URLs (e.g. mca-strategy-desk) to ensure valid rooms
+ */
+export const sanitizeMeetUrl = (url?: string): string => {
+  if (!url) return getDefaultMeetUrl();
+  if (
+    url.includes('mca-strategy-desk') ||
+    url.includes('mca-tianhe-bilateral') ||
+    !url.startsWith('https://meet.google.com/')
+  ) {
+    return getDefaultMeetUrl();
+  }
+  return url;
+};
+
+/**
  * Creates a Google Meet space using Google Meet API (v2)
  */
 export const createGoogleMeetSpace = async (token?: string | null): Promise<string> => {
   const authToken = token || cachedAccessToken;
   if (!authToken) {
-    return 'https://meet.google.com/mca-tianhe-bilateral';
+    return getDefaultMeetUrl();
   }
 
   try {
@@ -109,7 +183,7 @@ export const createGoogleMeetSpace = async (token?: string | null): Promise<stri
     console.warn('Could not create Google Meet space via API, using dedicated secure room link:', err);
   }
 
-  return 'https://meet.google.com/mca-tianhe-bilateral';
+  return getDefaultMeetUrl();
 };
 
 /**
@@ -118,7 +192,7 @@ export const createGoogleMeetSpace = async (token?: string | null): Promise<stri
 export const insertCalendarEventViaApi = async (
   booking: BookingDetails,
   token: string
-): Promise<{ success: boolean; eventLink?: string; error?: string }> => {
+): Promise<{ success: boolean; eventLink?: string; meetUrl?: string; error?: string }> => {
   try {
     // Parse date and time into RFC3339 timestamps
     // Default time is in WAT (UTC+1)
@@ -158,7 +232,7 @@ export const insertCalendarEventViaApi = async (
         `Client: ${booking.fullName} (${booking.companyName || 'Industrial Ventures'})\n` +
         `Sector: ${booking.industry}\n` +
         `Google Meet Link: ${booking.meetUrl}\n` +
-        `Direct Desk WhatsApp: +234 800 MERIDIAN\n\n` +
+        `Direct Desk WhatsApp: ${ADVISOR_WHATSAPP_DISPLAY} (09065839680)\n\n` +
         `Meridian China Advisory Ltd — Sovereign-Grade Bilateral Trade Architecture`,
       start: {
         dateTime: startIso,
@@ -214,7 +288,11 @@ export const insertCalendarEventViaApi = async (
 
     if (res.ok) {
       const data = await res.json();
-      return { success: true, eventLink: data.htmlLink };
+      const generatedMeetUrl =
+        data.hangoutLink ||
+        data.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri ||
+        booking.meetUrl;
+      return { success: true, eventLink: data.htmlLink, meetUrl: generatedMeetUrl };
     } else {
       const errData = await res.json();
       return { success: false, error: errData?.error?.message || 'Calendar insertion failed' };
@@ -234,7 +312,7 @@ export const generateGoogleCalendarUrl = (booking: BookingDetails): string => {
     `Ref: ${booking.auditReference}\n` +
     `Client: ${booking.fullName} (${booking.companyName})\n` +
     `Teleconference Feed: ${booking.meetUrl}\n` +
-    `Direct Concierge WhatsApp: +234 800 MERIDIAN`
+    `Direct Concierge WhatsApp: ${ADVISOR_WHATSAPP_DISPLAY} (09065839680)`
   );
   const location = encodeURIComponent(`Google Meet: ${booking.meetUrl}`);
 
@@ -526,7 +604,7 @@ export const dispatchConsultationEmailsViaApi = async ({
             }
           </div>
           <div class="footer">
-            Meridian China Advisory Ltd • Guangzhou &amp; Lagos Bilateral Trade Infrastructure
+            Meridian China Advisory • Bilateral Trade Intelligence Desk
           </div>
         </div>
       </body>
@@ -544,7 +622,7 @@ export const dispatchConsultationEmailsViaApi = async ({
     `Audit Reference: ${booking.auditReference}\n` +
     `Advisory Fee Cleared: ₦50,000.00 NGN\n\n` +
     `Advisor Contact: Director, Bilateral Trade Desk (${ADVISOR_EMAIL})\n` +
-    `WhatsApp Concierge: +234 800 MERIDIAN\n\n` +
+    `WhatsApp Concierge: ${ADVISOR_WHATSAPP_DISPLAY} (09065839680)\n\n` +
     `Meridian China Advisory Ltd`;
 
   const clientHtml = `
@@ -600,7 +678,7 @@ export const dispatchConsultationEmailsViaApi = async ({
             </div>
 
             <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-top: 20px;">
-              Please test your microphone and camera ahead of time. If you need to make adjustments or message the concierge team, reach out via WhatsApp at <strong>+234 800 MERIDIAN</strong>.
+              Please test your microphone and camera ahead of time. If you need to make adjustments or message the concierge team, reach out via WhatsApp at <strong>${ADVISOR_WHATSAPP_DISPLAY} (09065839680)</strong>.
             </p>
           </div>
           <div class="footer">

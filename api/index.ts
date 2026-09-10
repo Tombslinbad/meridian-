@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { dispatchAutomaticEmails, ADVISOR_EMAIL } from '../server/emailDispatcher';
 
 // Default sandbox key provided for Bachs.io payments
 const DEFAULT_BACHS_SANDBOX_KEY =
@@ -229,26 +230,41 @@ router.get('/payments/bachs/verify-checkout/:checkoutId', async (req, res) => {
   }
 });
 
-// Consultation Notification Dispatch
-router.post('/notifications/consultation-booked', (req, res) => {
+// Consultation Notification Dispatch (Automatic Server-Side Email Delivery)
+router.post('/notifications/consultation-booked', async (req, res) => {
   try {
-    const { booking } = req.body || {};
-    const advisorEmail = 'igwev2956@gmail.com';
+    const { booking, diagnostic } = req.body || {};
 
     if (!booking) {
       return res.status(400).json({ error: 'Missing booking payload' });
     }
 
+    const dispatchResult = await dispatchAutomaticEmails(booking, diagnostic);
+
     return res.json({
-      success: true,
-      dispatchedAt: new Date().toISOString(),
+      success: dispatchResult.success,
+      advisorEmailSent: dispatchResult.advisorSent,
+      clientEmailSent: dispatchResult.clientSent,
+      clientError: dispatchResult.clientError || null,
+      advisorError: dispatchResult.advisorError || null,
+      clientMessageId: dispatchResult.clientMessageId || null,
+      advisorMessageId: dispatchResult.advisorMessageId || null,
+      senders: dispatchResult.senders,
+      mode: dispatchResult.mode,
+      dispatchedAt: dispatchResult.timestamp,
       recipients: {
-        advisor: advisorEmail,
+        advisor: ADVISOR_EMAIL,
         client: booking.email,
+      },
+      calendar: {
+        summary: 'Meridian China Advisory: 1-on-1 Bilateral Trade Consultation',
+        meetUrl: booking.meetUrl,
+        attendees: [ADVISOR_EMAIL, booking.email].filter(Boolean),
       },
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err?.message || 'Failed to log notification' });
+    console.error('Server error dispatching automated emails in serverless API:', err);
+    return res.status(500).json({ error: err?.message || 'Failed to dispatch automatic notification' });
   }
 });
 

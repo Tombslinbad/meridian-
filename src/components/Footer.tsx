@@ -46,21 +46,16 @@ export const Footer: React.FC = () => {
             </span>
             <div className="flex flex-col gap-2.5 text-xs">
               <a
-                href="https://wa.me/23480063743426?text=Hello%20Meridian%20Trade%20Desk"
-                target="_blank"
-                rel="noreferrer"
-                className="text-on-surface hover:text-secondary flex items-center gap-2 transition-colors"
-              >
-                <span className="w-2 h-2 rounded-full bg-on-tertiary-container" />
-                <span>WhatsApp: +234 800 MERIDIAN</span>
-              </a>
-              <a
-                href="mailto:trade.desk@meridianchina.ng"
+                href="mailto:meridianadvisory@verifieduni.com"
                 className="text-on-surface hover:text-secondary flex items-center gap-2 transition-colors"
               >
                 <span className="w-2 h-2 rounded-full bg-secondary" />
-                <span>Email: trade.desk@meridianchina.ng</span>
+                <span>Email: meridianadvisory@verifieduni.com</span>
               </a>
+              <div className="text-on-surface-variant flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500/70" />
+                <span>Advisor WhatsApp: Unlocked upon booking</span>
+              </div>
               <div className="text-xs text-on-surface-variant pt-1">
                 Consultation Desks: WAT (Nigeria) &amp; CST (China) Timezones
               </div>

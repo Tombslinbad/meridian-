@@ -1,9 +1,21 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config();
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 
 // Default sandbox key provided for Bachs.io payments
+import { dispatchAutomaticEmails, ADVISOR_EMAIL } from './server/emailDispatcher';
+import {
+  getAvailabilityForDate,
+  getMonthAvailability,
+  reserveSlot,
+  confirmBookingInLedger,
+  getAdvisorSettings,
+  updateAdvisorSettings,
+  testIcalUrl,
+} from './server/calendarAvailability';
+
 const DEFAULT_BACHS_SANDBOX_KEY =
   'sk_sandbox_757c6cfc_lJCFv9m9v8fS_dgS77H_qCFgHsuRVoCH5kFKn8dAc3E';
 
@@ -80,6 +92,39 @@ async function startServer() {
         return res.status(400).json({
           error: 'Customer name and email are required to create a checkout session.',
         });
+      }
+
+      // Slot Conflict / Double-Booking Prevention Check:
+      // Verify that this slot is not already booked by another client or busy on the advisor's personal Google Calendar
+      const dateIsoForCheck = req.body.selectedDateIso || selectedDate;
+      if (dateIsoForCheck && selectedTime) {
+        // Normalize date to YYYY-MM-DD if in format like "Mon, Oct 12, 2026"
+        let normalizedDateIso = dateIsoForCheck;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateIso)) {
+          const m = dateIsoForCheck.match(/Oct\s+(\d{1,2})/i);
+          if (m) {
+            const d = parseInt(m[1], 10);
+            normalizedDateIso = `2026-10-${d < 10 ? '0' + d : d}`;
+          }
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateIso)) {
+          const reservation = await reserveSlot(normalizedDateIso, selectedTime, {
+            fullName: customerName,
+            email: customerEmail,
+            phone: phoneNumber,
+            companyName,
+          });
+
+          if (!reservation.success) {
+            return res.status(409).json({
+              error:
+                reservation.error ||
+                'This consultation time slot is no longer available. Please select another slot.',
+              code: 'SLOT_UNAVAILABLE',
+            });
+          }
+        }
       }
 
       const baseUrl = getBachsBaseUrl(apiKey);
@@ -233,42 +278,167 @@ async function startServer() {
     }
   });
 
-  // Consultation Notification Dispatch (Logs and verifies delivery parameters)
-  app.post('/api/notifications/consultation-booked', (req, res) => {
+  // Consultation Notification Dispatch (Automatic Server-Side Email Delivery)
+  app.post('/api/notifications/consultation-booked', async (req, res) => {
     try {
       const { booking, diagnostic } = req.body || {};
-      const advisorEmail = 'igwev2956@gmail.com';
 
       if (!booking) {
         return res.status(400).json({ error: 'Missing booking payload' });
       }
 
-      console.log(`[Notification Engine] Dispatched consultation notification:`, {
-        reference: booking.auditReference,
-        advisorEmail,
-        clientEmail: booking.email,
-        clientName: booking.fullName,
-        date: booking.selectedDate,
-        time: booking.selectedTime,
-        meetUrl: booking.meetUrl,
-        timestamp: new Date().toISOString(),
-      });
+      const dispatchResult = await dispatchAutomaticEmails(booking, diagnostic);
+
+      // Record permanently in the Calendar Availability Ledger to lock the slot against double-booking
+      try {
+        const dateIso = booking.selectedDateIso || booking.selectedDate;
+        let normalizedDateIso = dateIso;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateIso)) {
+          const m = String(dateIso).match(/Oct\s+(\d{1,2})/i);
+          if (m) {
+            const d = parseInt(m[1], 10);
+            normalizedDateIso = `2026-10-${d < 10 ? '0' + d : d}`;
+          }
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateIso) && booking.selectedTime) {
+          confirmBookingInLedger({
+            auditReference: booking.auditReference,
+            dateIso: normalizedDateIso,
+            timeSlot: booking.selectedTime,
+            fullName: booking.fullName,
+            email: booking.email,
+            phone: booking.phone,
+            companyName: booking.companyName,
+            meetUrl: booking.meetUrl,
+          });
+        }
+      } catch (ledgerErr) {
+        console.error('Error updating calendar ledger for booking:', ledgerErr);
+      }
 
       return res.json({
-        success: true,
-        dispatchedAt: new Date().toISOString(),
+        success: dispatchResult.success,
+        advisorEmailSent: dispatchResult.advisorSent,
+        clientEmailSent: dispatchResult.clientSent,
+        clientError: dispatchResult.clientError || null,
+        advisorError: dispatchResult.advisorError || null,
+        clientMessageId: dispatchResult.clientMessageId || null,
+        advisorMessageId: dispatchResult.advisorMessageId || null,
+        senders: dispatchResult.senders,
+        mode: dispatchResult.mode,
+        dispatchedAt: dispatchResult.timestamp,
         recipients: {
-          advisor: advisorEmail,
+          advisor: ADVISOR_EMAIL,
           client: booking.email,
         },
         calendar: {
           summary: 'Meridian China Advisory: 1-on-1 Bilateral Trade Consultation',
           meetUrl: booking.meetUrl,
-          attendees: [advisorEmail, booking.email].filter(Boolean),
+          attendees: [ADVISOR_EMAIL, booking.email].filter(Boolean),
         },
       });
     } catch (err: any) {
-      return res.status(500).json({ error: err?.message || 'Failed to log notification' });
+      console.error('Server error dispatching automated emails:', err);
+      return res.status(500).json({ error: err?.message || 'Failed to dispatch automatic notification' });
+    }
+  });
+
+  // ==========================================
+  // Calendar Availability & Personal Calendar Sync API
+  // ==========================================
+
+  // 1. Get Live Availability for a specific date (YYYY-MM-DD)
+  app.get('/api/calendar/availability', async (req, res) => {
+    try {
+      const { date, refresh } = req.query;
+      if (!date || typeof date !== 'string') {
+        return res.status(400).json({ error: 'Query parameter "date" (YYYY-MM-DD) is required.' });
+      }
+
+      const forceRefresh = refresh === 'true' || refresh === '1';
+      const availability = await getAvailabilityForDate(date, forceRefresh);
+      return res.json(availability);
+    } catch (err: any) {
+      console.error('Error fetching calendar availability:', err);
+      return res.status(500).json({ error: err?.message || 'Failed to fetch calendar availability' });
+    }
+  });
+
+  // 2. Get Month Availability Overview (e.g. October 2026)
+  app.get('/api/calendar/month-overview', async (req, res) => {
+    try {
+      const year = parseInt(req.query.year as string, 10) || 2026;
+      const month = parseInt(req.query.month as string, 10) || 10;
+      const overview = await getMonthAvailability(year, month);
+      return res.json({ year, month, overview });
+    } catch (err: any) {
+      console.error('Error fetching month overview:', err);
+      return res.status(500).json({ error: err?.message || 'Failed to fetch month overview' });
+    }
+  });
+
+  // 3. Atomically Reserve a Slot / Place Hold
+  app.post('/api/calendar/reserve-slot', async (req, res) => {
+    try {
+      const { dateIso, timeSlot, fullName, email, phone, companyName } = req.body;
+      if (!dateIso || !timeSlot || !fullName || !email) {
+        return res.status(400).json({ error: 'dateIso, timeSlot, fullName, and email are required.' });
+      }
+
+      const result = await reserveSlot(dateIso, timeSlot, {
+        fullName,
+        email,
+        phone,
+        companyName,
+      });
+
+      if (!result.success) {
+        return res.status(409).json({ error: result.error, code: 'SLOT_UNAVAILABLE' });
+      }
+
+      return res.json(result);
+    } catch (err: any) {
+      console.error('Error reserving slot:', err);
+      return res.status(500).json({ error: err?.message || 'Failed to reserve slot' });
+    }
+  });
+
+  // 4. Get Advisor Calendar & Availability Configuration
+  app.get('/api/calendar/advisor-settings', (_req, res) => {
+    try {
+      const settings = getAdvisorSettings();
+      return res.json(settings);
+    } catch (err: any) {
+      console.error('Error getting advisor settings:', err);
+      return res.status(500).json({ error: err?.message || 'Failed to get advisor settings' });
+    }
+  });
+
+  // 5. Update Advisor Calendar Settings (Google Calendar iCal URL, Working Hours, Blackouts)
+  app.post('/api/calendar/advisor-settings', async (req, res) => {
+    try {
+      const result = await updateAdvisorSettings(req.body);
+      return res.json(result);
+    } catch (err: any) {
+      console.error('Error updating advisor settings:', err);
+      return res.status(500).json({ error: err?.message || 'Failed to update advisor settings' });
+    }
+  });
+
+  // 6. Test Google Calendar iCal Connection
+  app.post('/api/calendar/test-sync', async (req, res) => {
+    try {
+      const { icalUrl } = req.body;
+      if (!icalUrl || typeof icalUrl !== 'string') {
+        return res.status(400).json({ error: 'icalUrl is required' });
+      }
+
+      const result = await testIcalUrl(icalUrl);
+      return res.json(result);
+    } catch (err: any) {
+      console.error('Error testing iCal URL:', err);
+      return res.status(500).json({ error: err?.message || 'Failed to test iCal link' });
     }
   });
 

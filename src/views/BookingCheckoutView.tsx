@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppTab, BookingDetails } from '../types';
 import { User } from 'firebase/auth';
+import { AdvisorCalendarModal } from '../components/AdvisorCalendarModal';
+import {
+  fetchDayAvailability,
+  fetchMonthOverview,
+  SlotAvailability,
+} from '../services/calendarAvailability';
 import {
   Lock,
   ArrowLeft,
@@ -42,11 +48,28 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
   const [currentMonth, setCurrentMonth] = useState<'September 2026' | 'October 2026' | 'November 2026'>('October 2026');
   const [selectedDayNumber, setSelectedDayNumber] = useState<number>(12);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>(booking.selectedTime || '11:30 AM');
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'transfer' | 'mobile_money' | 'crypto'>('card');
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(true);
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
   const [paymentStepText, setPaymentStepText] = useState<string>('Initializing Secure Gateway...');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+
+  // Live Calendar Availability & Personal Google Calendar Sync States
+  const [slotsAvailability, setSlotsAvailability] = useState<SlotAvailability[]>([
+    { slot: '10:00 AM', time24: '10:00', startIso: '', endIso: '', available: true, status: 'available' },
+    { slot: '11:30 AM', time24: '11:30', startIso: '', endIso: '', available: true, status: 'available' },
+    { slot: '02:00 PM', time24: '14:00', startIso: '', endIso: '', available: true, status: 'available' },
+    { slot: '04:00 PM', time24: '16:00', startIso: '', endIso: '', available: true, status: 'available' },
+    { slot: '06:00 PM', time24: '18:00', startIso: '', endIso: '', available: true, status: 'available' },
+    { slot: '08:00 PM', time24: '20:00', startIso: '', endIso: '', available: true, status: 'available' },
+  ]);
+  const [monthOverview, setMonthOverview] = useState<{
+    [dateIso: string]: { availableSlots: number; totalSlots: number; isFullyBooked: boolean };
+  }>({});
+  const [isLoadingAvailability, setIsLoadingAvailability] = useState<boolean>(false);
+  const [calendarSynced, setCalendarSynced] = useState<boolean>(false);
+  const [syncStatusMessage, setSyncStatusMessage] = useState<string>('');
+  const [isAdvisorModalOpen, setIsAdvisorModalOpen] = useState<boolean>(false);
+
   const [fieldErrors, setFieldErrors] = useState<{
     fullName?: string;
     email?: string;
@@ -165,29 +188,13 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
           onBookingSuccess();
           return true;
         } else if (isManual) {
-          if (data && data.status === 'open') {
-            // Check if user wants to finalize sandbox simulation
-            const confirmTest = window.confirm(
-              `Bachs checkout session is active (${data.paymentStatus || 'awaiting completion'}). Would you like to confirm the sandbox payment now to see your booked consultation details?`
-            );
-            if (confirmTest) {
-              if (pollingTimerRef.current) {
-                clearInterval(pollingTimerRef.current);
-              }
-              setIsPollingBachs(false);
-              setIsProcessingPayment(false);
-              onUpdateBooking({
-                paymentStatus: 'succeeded',
-                auditReference: data.reference || booking.auditReference,
-                bachsCheckoutId: checkoutId,
-              });
-              onBookingSuccess();
-              return true;
-            }
-          }
+          setPaymentError('Payment has not been completed yet. Please complete your payment in the secure Bachs.io checkout session above.');
         }
       } catch (e) {
         console.warn('Polling error:', e);
+        if (isManual) {
+          setPaymentError('Could not verify payment status with Bachs.io. Please complete payment first.');
+        }
       } finally {
         if (isManual) setIsVerifyingManual(false);
       }
@@ -216,6 +223,53 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
   // Active dates in October 2026
   const activeOctoberDays = [1, 2, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 26, 27, 28, 29, 30];
 
+  const loadAvailabilityForDate = useCallback(
+    async (dateIso: string, refresh = false) => {
+      setIsLoadingAvailability(true);
+      try {
+        const res = await fetchDayAvailability(dateIso, refresh);
+        setSlotsAvailability(res.slots);
+        setCalendarSynced(res.calendarSynced);
+        setSyncStatusMessage(res.syncInfo.message || '');
+
+        // Verify if currently selected time slot is available
+        const currentSlotObj = res.slots.find((s) => s.slot === selectedTimeSlot);
+        if (!currentSlotObj || !currentSlotObj.available) {
+          const firstOpen = res.slots.find((s) => s.available);
+          if (firstOpen) {
+            setSelectedTimeSlot(firstOpen.slot);
+            onUpdateBooking({ selectedTime: firstOpen.slot });
+          } else {
+            setSelectedTimeSlot('');
+            onUpdateBooking({ selectedTime: '' });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load slots availability:', err);
+      } finally {
+        setIsLoadingAvailability(false);
+      }
+    },
+    [selectedTimeSlot, onUpdateBooking]
+  );
+
+  const loadMonthOverview = useCallback(async () => {
+    try {
+      const data = await fetchMonthOverview(2026, 10);
+      setMonthOverview(data.overview || {});
+    } catch (err) {
+      console.error('Failed to load month overview:', err);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    const initialIso = booking.selectedDateIso || `2026-10-${pad(selectedDayNumber)}`;
+    loadAvailabilityForDate(initialIso);
+    loadMonthOverview();
+  }, []);
+
   const handleDateSelect = (dayNum: number) => {
     setSelectedDayNumber(dayNum);
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -229,6 +283,8 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
       selectedDate: dateFormatted,
       selectedDateIso: iso,
     });
+
+    loadAvailabilityForDate(iso);
   };
 
   const handleTimeSelect = (timeStr: string) => {
@@ -249,9 +305,35 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
       return;
     }
 
+    // Double-Booking & Slot Conflict Prevention:
+    // Ensure an available time slot is selected
+    if (!selectedTimeSlot) {
+      setPaymentError('Please select an available consultation slot on the calendar before proceeding.');
+      const calEl = document.getElementById('step-1-calendar');
+      if (calEl) {
+        calEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
+
+    const currentSlotObj = slotsAvailability.find((s) => s.slot === selectedTimeSlot);
+    if (currentSlotObj && !currentSlotObj.available) {
+      setPaymentError(
+        `The selected time slot (${selectedTimeSlot}) is no longer available (${currentSlotObj.reason || 'conflict detected'}). Please choose another slot from the calendar.`
+      );
+      const calEl = document.getElementById('step-1-calendar');
+      if (calEl) {
+        calEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
+
     setPaymentError(null);
     setIsProcessingPayment(true);
-    setPaymentStepText('Connecting to Bachs.io Payments Gateway...');
+    setPaymentStepText('Securing consultation slot & connecting to Bachs gateway...');
+
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    const selectedIso = booking.selectedDateIso || `2026-10-${pad(selectedDayNumber)}`;
 
     try {
       const res = await fetch('/api/payments/bachs/create-checkout', {
@@ -266,7 +348,8 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
           tripObjective: booking.tripObjective,
           travelWindow: booking.travelWindow,
           selectedDate: booking.selectedDate,
-          selectedTime: booking.selectedTime,
+          selectedDateIso: selectedIso,
+          selectedTime: booking.selectedTime || selectedTimeSlot,
           amount: booking.amountNgn || 50000,
           currency: 'NGN',
         }),
@@ -287,6 +370,20 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
         throw new Error(`Server returned status ${res.status}: ${rawText.slice(0, 100)}`);
       }
 
+      if (res.status === 409 || data.code === 'SLOT_UNAVAILABLE') {
+        setIsProcessingPayment(false);
+        setPaymentError(
+          data.error ||
+            'This consultation slot was just taken by another client or blocked on the advisor calendar. Please select another slot.'
+        );
+        loadAvailabilityForDate(selectedIso, true);
+        const calEl = document.getElementById('step-1-calendar');
+        if (calEl) {
+          calEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        return;
+      }
+
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Unable to generate Bachs checkout session.');
       }
@@ -303,7 +400,7 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
         auditReference: data.reference,
         bachsCheckoutId: data.checkoutId,
         bachsCheckoutUrl: data.checkoutUrl,
-        paymentChannel: paymentMethod,
+        paymentChannel: 'bachs',
       });
 
       setPaymentStepText('Bachs Checkout Ready. Opening Session...');
@@ -323,19 +420,16 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
     setIsProcessingPayment(false);
   };
 
-  const handleSimulateSandboxPayment = () => {
-    if (pollingTimerRef.current) {
-      clearInterval(pollingTimerRef.current);
+  const handleVerifyPayment = async () => {
+    if (!createdCheckout?.checkoutId) {
+      setPaymentError('Please establish a secure payment checkout session first.');
+      return;
     }
-    setIsPollingBachs(false);
-    setIsProcessingPayment(false);
-    onUpdateBooking({
-      paymentStatus: 'succeeded',
-      auditReference: createdCheckout?.reference || booking.auditReference,
-      bachsCheckoutId: createdCheckout?.checkoutId || 'chk_sandbox_verified',
-      paymentChannel: paymentMethod,
-    });
-    onBookingSuccess();
+    setPaymentError('');
+    const success = await checkBachsVerification(createdCheckout.checkoutId, true);
+    if (!success) {
+      setPaymentError('Payment has not been completed yet. Please complete your payment in the secure Bachs.io checkout session above before confirmation.');
+    }
   };
 
   return (
@@ -370,7 +464,7 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
           <div className="lg:col-span-6 flex flex-col gap-8">
             
             {/* Step 1 Card: Calendar & Slot Selection */}
-            <div className="p-6 sm:p-8 rounded-3xl bg-surface-container-lowest border border-surface-container shadow-sm flex flex-col gap-6">
+            <div id="step-1-calendar" className="p-6 sm:p-8 rounded-3xl bg-surface-container-lowest border border-surface-container shadow-sm flex flex-col gap-6">
               <div className="flex items-center justify-between pb-4 border-b border-surface-container">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-xl bg-secondary text-white flex items-center justify-center font-bold text-sm">
@@ -381,10 +475,50 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                     <p className="text-xs text-on-surface-variant">Synchronized West Africa Time (WAT / Lagos)</p>
                   </div>
                 </div>
-                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-tertiary-fixed/30 text-on-tertiary-container flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-on-tertiary-container animate-pulse" />
-                  Live Desk
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAdvisorModalOpen(true)}
+                    className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-surface-container hover:bg-surface-container-high text-on-surface flex items-center gap-1 transition-colors"
+                    title="Configure Google Calendar synchronization"
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-secondary" />
+                    <span>Advisor Calendar Sync</span>
+                  </button>
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-tertiary-fixed/30 text-on-tertiary-container flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-on-tertiary-container animate-pulse" />
+                    Live Desk
+                  </span>
+                </div>
+              </div>
+
+              {/* Real-time personal calendar synchronization banner */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2 text-xs">
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      calendarSynced ? 'bg-emerald-500 animate-pulse' : 'bg-secondary'
+                    }`}
+                  />
+                  <span className="text-on-surface-variant">
+                    {calendarSynced
+                      ? 'Live synced with Advisor Personal Google Calendar — Automatic collision prevention active'
+                      : 'Advisor Schedule Ledger Active — 1-on-1 double-booking prevention enabled'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+                    const iso = booking.selectedDateIso || `2026-10-${pad(selectedDayNumber)}`;
+                    loadAvailabilityForDate(iso, true);
+                  }}
+                  disabled={isLoadingAvailability}
+                  className="text-[11px] text-secondary hover:underline flex items-center gap-1 font-bold shrink-0 self-end sm:self-auto"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoadingAvailability ? 'animate-spin' : ''}`} />
+                  <span>{isLoadingAvailability ? 'Checking...' : 'Refresh Live Schedule'}</span>
+                </button>
               </div>
 
               {/* Month Header */}
@@ -425,8 +559,12 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                 <span className="h-10 flex items-center justify-center text-xs text-outline/40">29</span>
                 <span className="h-10 flex items-center justify-center text-xs text-outline/40">30</span>
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((dayNum) => {
+                  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+                  const iso = `2026-10-${pad(dayNum)}`;
                   const isSelectable = activeOctoberDays.includes(dayNum);
                   const isSelected = selectedDayNumber === dayNum;
+                  const dayOverview = monthOverview[iso];
+                  const isFullyBooked = isSelectable && dayOverview && dayOverview.isFullyBooked;
 
                   if (!isSelectable) {
                     return (
@@ -443,14 +581,31 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                     <button
                       key={dayNum}
                       type="button"
+                      disabled={Boolean(isFullyBooked)}
                       onClick={() => handleDateSelect(dayNum)}
-                      className={`h-10 rounded-xl flex items-center justify-center text-sm font-semibold transition-all ${
-                        isSelected
+                      title={
+                        isFullyBooked
+                          ? 'Fully booked on personal calendar and advisory ledger'
+                          : `${dayOverview ? dayOverview.availableSlots : 'Open'} slots available`
+                      }
+                      className={`h-10 rounded-xl flex flex-col items-center justify-center text-sm font-semibold transition-all relative ${
+                        isFullyBooked
+                          ? 'bg-surface-container text-outline/50 cursor-not-allowed line-through'
+                          : isSelected
                           ? 'bg-secondary text-white font-bold shadow-md shadow-secondary/20'
                           : 'text-on-surface hover:bg-surface-container'
                       }`}
                     >
-                      {dayNum}
+                      <span>{dayNum}</span>
+                      {isFullyBooked ? (
+                        <span className="text-[8px] font-bold text-error uppercase leading-none">Full</span>
+                      ) : (
+                        <span
+                          className={`w-1 h-1 rounded-full mt-0.5 ${
+                            isSelected ? 'bg-white' : 'bg-emerald-500'
+                          }`}
+                        />
+                      )}
                     </button>
                   );
                 })}
@@ -459,30 +614,77 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
               {/* Time Slots */}
               <div className="flex flex-col gap-3 pt-4 border-t border-surface-container">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-on-surface">
-                    Available times for: <strong className="text-secondary">{booking.selectedDate}</strong>
-                  </span>
-                  <span className="text-[11px] text-on-surface-variant">60-Min Video Call</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-on-surface">
+                      Consultation times for: <strong className="text-secondary">{booking.selectedDate}</strong>
+                    </span>
+                    {isLoadingAvailability && (
+                      <RefreshCw className="w-3 h-3 animate-spin text-secondary" />
+                    )}
+                  </div>
+                  <span className="text-[11px] text-on-surface-variant font-medium">60-Min Video Call</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {['10:00 AM', '11:30 AM', '02:00 PM', '04:00 PM', '06:00 PM', '08:00 PM'].map((slot) => {
-                    const isSelected = selectedTimeSlot === slot;
+
+                {/* Available Slots Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {slotsAvailability.map((slotItem) => {
+                    const isSelected = selectedTimeSlot === slotItem.slot;
+                    const isAvailable = slotItem.available;
+
                     return (
                       <button
-                        key={slot}
+                        key={slotItem.slot}
                         type="button"
-                        onClick={() => handleTimeSelect(slot)}
-                        className={`min-h-[44px] py-2.5 px-2 rounded-xl text-xs font-semibold text-center transition-all ${
-                          isSelected
-                            ? 'bg-secondary text-white shadow-sm'
-                            : 'bg-surface-container-low text-on-surface hover:bg-surface-container'
+                        disabled={!isAvailable}
+                        onClick={() => isAvailable && handleTimeSelect(slotItem.slot)}
+                        title={
+                          !isAvailable
+                            ? `Unavailable: ${slotItem.reason || 'Slot already booked or reserved on personal calendar'}`
+                            : 'Click to select this consultation slot'
+                        }
+                        className={`min-h-[52px] py-2 px-2.5 rounded-2xl text-xs font-semibold text-center transition-all flex flex-col items-center justify-center gap-0.5 relative ${
+                          !isAvailable
+                            ? 'bg-surface-container/70 text-outline/60 border border-surface-container cursor-not-allowed opacity-80'
+                            : isSelected
+                            ? 'bg-secondary text-white shadow-md shadow-secondary/25'
+                            : 'bg-surface-container-low text-on-surface hover:bg-surface-container border border-surface-container/40'
                         }`}
                       >
-                        {slot}
+                        <div className="flex items-center gap-1.5">
+                          <span className={!isAvailable ? 'line-through' : ''}>{slotItem.slot}</span>
+                        </div>
+
+                        <span
+                          className={`text-[10px] font-bold ${
+                            !isAvailable
+                              ? 'text-error font-semibold'
+                              : isSelected
+                              ? 'text-white/90'
+                              : 'text-emerald-700 dark:text-emerald-400'
+                          }`}
+                        >
+                          {slotItem.status === 'booked_client'
+                            ? 'Booked by Client'
+                            : slotItem.status === 'advisor_busy_calendar'
+                            ? 'Personal Calendar Busy'
+                            : slotItem.status === 'advisor_blocked_manual'
+                            ? 'Advisor Blocked'
+                            : 'Available'}
+                        </span>
                       </button>
                     );
                   })}
                 </div>
+
+                {/* Conflict Notice if all slots unavailable */}
+                {slotsAvailability.every((s) => !s.available) && (
+                  <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2 mt-1">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                    <span>
+                      All consultation slots on this date are occupied or busy on the advisor's personal calendar. Please select another open date on the calendar above.
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -787,6 +989,10 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                   <span className="font-semibold text-on-surface">₦50,000.00</span>
                 </div>
                 <div className="flex justify-between text-xs text-on-surface-variant">
+                  <span>Bachs.io Gateway Processing Fee (1.5%)</span>
+                  <span className="font-semibold text-on-surface">₦750.00</span>
+                </div>
+                <div className="flex justify-between text-xs text-on-surface-variant">
                   <span>Platform VAT &amp; Escrow Protection</span>
                   <span className="font-bold text-on-tertiary-container">WAIVED (₦0.00)</span>
                 </div>
@@ -794,138 +1000,16 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                 <div className="flex justify-between items-baseline">
                   <span className="text-sm font-bold text-on-surface">Total Due Now</span>
                   <div className="text-right">
-                    <span className="text-2xl font-bold text-secondary">₦50,000</span>
+                    <span className="text-2xl font-bold text-secondary">₦50,750</span>
                     <span className="text-[10px] text-on-surface-variant block">100% Credited to Sourcing Retainers</span>
                   </div>
                 </div>
               </div>
 
-              {/* Payment Channel Selection */}
-              <div className="flex flex-col gap-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-on-surface uppercase tracking-wider">
-                    Select Payment Method (Bachs.io)
-                  </label>
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-secondary-fixed text-secondary">
-                    <Zap className="w-3 h-3" />
-                    Sandbox Active
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label
-                    onClick={() => {
-                      setPaymentMethod('card');
-                      onUpdateBooking({ paymentChannel: 'card' });
-                    }}
-                    className={`flex items-center gap-3 p-3.5 rounded-2xl cursor-pointer border transition-all ${
-                      paymentMethod === 'card'
-                        ? 'bg-surface-container-high/70 border-secondary shadow-xs'
-                        : 'bg-surface-container-low border-surface-container hover:bg-surface-container'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="paymentChannel"
-                      checked={paymentMethod === 'card'}
-                      onChange={() => {
-                        setPaymentMethod('card');
-                        onUpdateBooking({ paymentChannel: 'card' });
-                      }}
-                      className="w-4 h-4 text-secondary accent-secondary"
-                    />
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-bold text-on-surface">Debit / Credit Card</span>
-                      <span className="text-[10px] text-on-surface-variant truncate">Mastercard, Visa, Verve</span>
-                    </div>
-                  </label>
-
-                  <label
-                    onClick={() => {
-                      setPaymentMethod('transfer');
-                      onUpdateBooking({ paymentChannel: 'transfer' });
-                    }}
-                    className={`flex items-center gap-3 p-3.5 rounded-2xl cursor-pointer border transition-all ${
-                      paymentMethod === 'transfer'
-                        ? 'bg-surface-container-high/70 border-secondary shadow-xs'
-                        : 'bg-surface-container-low border-surface-container hover:bg-surface-container'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="paymentChannel"
-                      checked={paymentMethod === 'transfer'}
-                      onChange={() => {
-                        setPaymentMethod('transfer');
-                        onUpdateBooking({ paymentChannel: 'transfer' });
-                      }}
-                      className="w-4 h-4 text-secondary accent-secondary"
-                    />
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-bold text-on-surface">Direct Bank Transfer</span>
-                      <span className="text-[10px] text-on-surface-variant truncate">Instant Virtual NGN Account</span>
-                    </div>
-                  </label>
-
-                  <label
-                    onClick={() => {
-                      setPaymentMethod('mobile_money');
-                      onUpdateBooking({ paymentChannel: 'mobile_money' });
-                    }}
-                    className={`flex items-center gap-3 p-3.5 rounded-2xl cursor-pointer border transition-all ${
-                      paymentMethod === 'mobile_money'
-                        ? 'bg-surface-container-high/70 border-secondary shadow-xs'
-                        : 'bg-surface-container-low border-surface-container hover:bg-surface-container'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="paymentChannel"
-                      checked={paymentMethod === 'mobile_money'}
-                      onChange={() => {
-                        setPaymentMethod('mobile_money');
-                        onUpdateBooking({ paymentChannel: 'mobile_money' });
-                      }}
-                      className="w-4 h-4 text-secondary accent-secondary"
-                    />
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-bold text-on-surface">Mobile Money</span>
-                      <span className="text-[10px] text-on-surface-variant truncate">MTN MoMo, M-Pesa, Airtel</span>
-                    </div>
-                  </label>
-
-                  <label
-                    onClick={() => {
-                      setPaymentMethod('crypto');
-                      onUpdateBooking({ paymentChannel: 'crypto' });
-                    }}
-                    className={`flex items-center gap-3 p-3.5 rounded-2xl cursor-pointer border transition-all ${
-                      paymentMethod === 'crypto'
-                        ? 'bg-surface-container-high/70 border-secondary shadow-xs'
-                        : 'bg-surface-container-low border-surface-container hover:bg-surface-container'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="paymentChannel"
-                      checked={paymentMethod === 'crypto'}
-                      onChange={() => {
-                        setPaymentMethod('crypto');
-                        onUpdateBooking({ paymentChannel: 'crypto' });
-                      }}
-                      className="w-4 h-4 text-secondary accent-secondary"
-                    />
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-bold text-on-surface">USDT / USDC Crypto</span>
-                      <span className="text-[10px] text-on-surface-variant truncate">TRC20 &amp; ERC20 Stablecoins</span>
-                    </div>
-                  </label>
-                </div>
-
-                <div className="p-2.5 rounded-xl bg-surface-container-low border border-surface-container flex items-center gap-2 text-[11px] text-on-surface-variant">
-                  <ShieldCheck className="w-3.5 h-3.5 text-secondary shrink-0" />
-                  <span>Payments processed securely via <strong>Bachs.io API</strong> with bilateral escrow protection.</span>
-                </div>
+              {/* Secure Payment Notice */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container flex items-center gap-3 text-xs text-on-surface-variant">
+                <ShieldCheck className="w-4 h-4 text-secondary shrink-0" />
+                <span>Payments are processed securely via <strong>Bachs.io API</strong> with multi-currency support, cards, bank transfers, and escrow protection.</span>
               </div>
 
               {/* Error Message if any */}
@@ -969,7 +1053,7 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                 className="w-full min-h-[54px] py-3.5 px-6 rounded-2xl bg-secondary text-on-secondary font-bold text-base flex items-center justify-center gap-3 shadow-xl shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98 disabled:opacity-50"
               >
                 <Lock className="w-4 h-4 text-white/90" />
-                <span>Confirm &amp; Pay with Bachs — ₦50,000</span>
+                <span>Proceed to Secure Bachs.io Checkout — ₦50,750</span>
                 <ArrowRight className="w-5 h-5 text-white/90" />
               </button>
 
@@ -1034,11 +1118,12 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleSimulateSandboxPayment}
-                  className="px-3.5 py-1.5 rounded-xl bg-secondary text-white text-xs font-bold hover:bg-secondary-container transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
+                  onClick={handleVerifyPayment}
+                  disabled={isVerifyingManual}
+                  className="px-3.5 py-1.5 rounded-xl bg-secondary text-white text-xs font-bold hover:bg-secondary-container transition-all flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50"
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Payment Completed — View Consultation Details</span>
+                  <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingManual ? 'animate-spin' : ''}`} />
+                  <span>{isVerifyingManual ? 'Verifying...' : 'Verify Payment & Confirm Booking'}</span>
                 </button>
               </div>
             </div>
@@ -1097,11 +1182,12 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={handleSimulateSandboxPayment}
-                  className="px-5 py-2.5 rounded-xl bg-secondary text-white font-bold text-xs hover:bg-secondary-container transition-all flex items-center gap-2 shadow-md active:scale-95"
+                  onClick={handleVerifyPayment}
+                  disabled={isVerifyingManual}
+                  className="px-5 py-2.5 rounded-xl bg-secondary text-white font-bold text-xs hover:bg-secondary-container transition-all flex items-center gap-2 shadow-md active:scale-95 disabled:opacity-50"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Payment Completed — View Confirmed Consultation</span>
+                  <span>{isVerifyingManual ? 'Verifying with Bachs...' : 'Verify Payment & Confirm Booking'}</span>
                 </button>
               </div>
             </div>
@@ -1109,6 +1195,18 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Advisor Google Calendar Sync Modal */}
+      <AdvisorCalendarModal
+        isOpen={isAdvisorModalOpen}
+        onClose={() => setIsAdvisorModalOpen(false)}
+        onAvailabilityUpdated={() => {
+          const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+          const iso = booking.selectedDateIso || `2026-10-${pad(selectedDayNumber)}`;
+          loadAvailabilityForDate(iso, true);
+          loadMonthOverview();
+        }}
+      />
     </div>
   );
 };

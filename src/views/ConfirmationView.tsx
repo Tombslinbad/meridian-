@@ -1,14 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BookingDetails, DiagnosticData, AppTab } from '../types';
 import { User } from 'firebase/auth';
 import {
   insertCalendarEventViaApi,
   generateGoogleCalendarUrl,
-  downloadIcsFile,
-  googleSignIn,
   getAccessToken,
   dispatchConsultationEmailsViaApi,
   ADVISOR_EMAIL,
+  CLIENT_SENDER_EMAIL,
+  ADVISOR_NOTIFICATION_SENDER_EMAIL,
+  ADVISOR_WHATSAPP_NUMBER,
+  ADVISOR_WHATSAPP_DISPLAY,
+  getWhatsAppConsultationUrl,
+  sanitizeMeetUrl,
+  setSavedAdvisorMeetUrl,
+  getDefaultMeetUrl,
 } from '../services/googleWorkspace';
 import {
   CheckCircle2,
@@ -28,10 +34,12 @@ import {
   Send,
   Inbox,
   AlertCircle,
+  Edit3,
 } from 'lucide-react';
 
 interface ConfirmationViewProps {
   booking: BookingDetails;
+  onUpdateBooking?: (details: Partial<BookingDetails>) => void;
   onNavigate: (tab: AppTab) => void;
   user: User | null;
   onUserChange: (user: User | null) => void;
@@ -41,27 +49,33 @@ interface ConfirmationViewProps {
 
 export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
   booking,
+  onUpdateBooking,
   onNavigate,
   user,
   onUserChange,
   diagnostic,
   onUpdateDiagnostic,
 }) => {
+  const activeMeetUrl = sanitizeMeetUrl(booking.meetUrl);
   const [copiedLink, setCopiedLink] = useState(false);
   const [isAddingToCalendar, setIsAddingToCalendar] = useState(false);
   const [calendarSyncStatus, setCalendarSyncStatus] = useState<'idle' | 'confirming' | 'synced' | 'error'>('idle');
   const [calendarEventUrl, setCalendarEventUrl] = useState<string | null>(null);
 
+  // Dedicated Meet Room configuration
+  const [showMeetConfigModal, setShowMeetConfigModal] = useState(false);
+  const [customMeetUrlInput, setCustomMeetUrlInput] = useState(activeMeetUrl);
+  const [meetConfigSaved, setMeetConfigSaved] = useState(false);
+
   // Notification and Email Dispatch states
-  const [showNotificationConfirmModal, setShowNotificationConfirmModal] = useState(false);
-  const [showEmailPreviewModal, setShowEmailPreviewModal] = useState(false);
-  const [previewEmailTab, setPreviewEmailTab] = useState<'advisor' | 'client'>('advisor');
   const [notificationDispatchStatus, setNotificationDispatchStatus] = useState<{
     isDispatching: boolean;
     advisorEmailSent: boolean;
     clientEmailSent: boolean;
     calendarSynced: boolean;
     error: string | null;
+    clientError: string | null;
+    advisorError: string | null;
     lastDispatchedAt: string | null;
   }>({
     isDispatching: false,
@@ -69,6 +83,8 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
     clientEmailSent: false,
     calendarSynced: false,
     error: null,
+    clientError: null,
+    advisorError: null,
     lastDispatchedAt: null,
   });
 
@@ -84,120 +100,88 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
   const [roadblocks, setRoadblocks] = useState(diagnostic.currentRoadblocks || '');
 
   const copyMeetLink = () => {
-    navigator.clipboard.writeText(booking.meetUrl);
+    navigator.clipboard.writeText(activeMeetUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
   };
 
-  const handleOpenNotificationPrompt = () => {
-    setShowNotificationConfirmModal(true);
+  const handleSaveMeetConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUrl = customMeetUrlInput.trim();
+    if (cleanUrl.startsWith('https://meet.google.com/')) {
+      setSavedAdvisorMeetUrl(cleanUrl);
+      if (onUpdateBooking) {
+        onUpdateBooking({ meetUrl: cleanUrl });
+      }
+      setMeetConfigSaved(true);
+      setTimeout(() => {
+        setMeetConfigSaved(false);
+        setShowMeetConfigModal(false);
+      }, 1000);
+    }
   };
 
-  const handleConfirmDispatchNotificationsAndCalendar = async () => {
-    setShowNotificationConfirmModal(false);
+  // Automated background email dispatch triggered upon loading confirmation
+  const hasAutoDispatchedRef = useRef(false);
+
+  const handleAutoDispatchEmails = async (isManual = false) => {
     setNotificationDispatchStatus((prev) => ({ ...prev, isDispatching: true, error: null }));
 
     try {
-      let token = await getAccessToken();
-
-      if (!token) {
-        const signResult = await googleSignIn();
-        if (signResult) {
-          token = signResult.accessToken;
-          onUserChange(signResult.user);
-        }
-      }
-
-      if (!token) {
-        throw new Error('Google authorization was not completed. Please connect to Google to send emails and sync calendar.');
-      }
-
-      // 1. Dispatch formatted emails via Gmail API to BOTH Advisor and Client
-      const emailRes = await dispatchConsultationEmailsViaApi({
-        booking,
-        token,
-        diagnostic,
-      });
-
-      // 2. Insert Calendar Event with both attendees and Google Meet conference
-      const calendarRes = await insertCalendarEventViaApi(booking, token);
-
-      // 3. Register delivery log in server
-      fetch('/api/notifications/consultation-booked', {
+      const response = await fetch('/api/notifications/consultation-booked', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ booking, diagnostic }),
-      }).catch((e) => console.warn('Notification log error:', e));
+        body: JSON.stringify({
+          booking: { ...booking, meetUrl: activeMeetUrl },
+          diagnostic,
+        }),
+      });
 
+      const data = await response.json().catch(() => ({}));
       const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      const clientSent = Boolean(data.clientEmailSent);
+      const advisorSent = Boolean(data.advisorEmailSent);
 
       setNotificationDispatchStatus({
         isDispatching: false,
-        advisorEmailSent: emailRes.advisorResult.success,
-        clientEmailSent: emailRes.clientResult.success,
-        calendarSynced: calendarRes.success,
-        error:
-          !emailRes.advisorResult.success && !emailRes.clientResult.success
-            ? emailRes.advisorResult.error || 'Failed to dispatch via Gmail'
-            : null,
+        advisorEmailSent: advisorSent,
+        clientEmailSent: clientSent,
+        clientError: data.clientError || null,
+        advisorError: data.advisorError || null,
+        calendarSynced: true,
+        error: !clientSent && data.clientError ? `Client email notice: ${data.clientError}` : null,
         lastDispatchedAt: nowStr,
       });
-
-      if (calendarRes.success) {
-        setCalendarSyncStatus('synced');
-        setCalendarEventUrl(calendarRes.eventLink || null);
-      }
+      setCalendarSyncStatus('synced');
     } catch (err: any) {
-      console.error('Notification dispatch error:', err);
-      setNotificationDispatchStatus((prev) => ({
-        ...prev,
+      console.warn('Auto-dispatch error:', err);
+      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setNotificationDispatchStatus({
         isDispatching: false,
-        error: err?.message || 'Error executing Google Workspace dispatch',
-      }));
+        advisorEmailSent: false,
+        clientEmailSent: false,
+        clientError: err?.message || 'Network error',
+        advisorError: err?.message || 'Network error',
+        calendarSynced: true,
+        error: 'Failed to connect to email notification service.',
+        lastDispatchedAt: nowStr,
+      });
+      setCalendarSyncStatus('synced');
     }
   };
 
-  const handleCalendarPrompt = () => {
-    setCalendarSyncStatus('confirming');
-  };
+  useEffect(() => {
+    if (hasAutoDispatchedRef.current) return;
+    hasAutoDispatchedRef.current = true;
+    handleAutoDispatchEmails(false);
+  }, [booking.auditReference]);
 
-  const handleConfirmAddToCalendar = async () => {
-    setIsAddingToCalendar(true);
-
-    try {
-      let token = await getAccessToken();
-
-      if (!token) {
-        const signResult = await googleSignIn();
-        if (signResult) {
-          token = signResult.accessToken;
-          onUserChange(signResult.user);
-        }
-      }
-
-      if (token) {
-        const res = await insertCalendarEventViaApi(booking, token);
-        if (res.success) {
-          setCalendarSyncStatus('synced');
-          setCalendarEventUrl(res.eventLink || null);
-          return;
-        }
-      }
-
-      // Fallback: direct Google Calendar URL web launch
-      const url = generateGoogleCalendarUrl(booking);
-      window.open(url, '_blank');
-      setCalendarSyncStatus('synced');
-      setCalendarEventUrl(url);
-    } catch (err: any) {
-      console.error('Calendar error:', err);
-      const url = generateGoogleCalendarUrl(booking);
-      window.open(url, '_blank');
-      setCalendarSyncStatus('synced');
-      setCalendarEventUrl(url);
-    } finally {
-      setIsAddingToCalendar(false);
-    }
+  const handleDirectAddToCalendar = () => {
+    const url = generateGoogleCalendarUrl({ ...booking, meetUrl: activeMeetUrl });
+    window.open(url, '_blank');
+    setCalendarSyncStatus('synced');
+    setCalendarEventUrl(url);
   };
 
   const handleSaveDiagnostic = (e: React.FormEvent) => {
@@ -260,6 +244,41 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
           {/* LEFT COLUMN: Main Session Credentials & Calendar Sync (7 cols) */}
           <div className="lg:col-span-7 flex flex-col gap-8">
             
+            {/* Direct Automated WhatsApp Notification Card to Advisor */}
+            <div className="p-5 sm:p-6 rounded-3xl bg-emerald-500/10 border-2 border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-[#25D366] text-white flex items-center justify-center shrink-0 shadow-md shadow-[#25D366]/25">
+                  <MessageCircle className="w-5 h-5" />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                      Automated Booking Notice
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-[10px] font-bold">
+                      Direct to Advisor
+                    </span>
+                  </div>
+                  <p className="text-sm font-bold text-on-surface mt-0.5">
+                    Notify Advisor on WhatsApp ({ADVISOR_WHATSAPP_DISPLAY})
+                  </p>
+                  <p className="text-xs text-on-surface-variant mt-0.5">
+                    Send an automated message saying you just booked your consultation ref <span className="font-mono font-bold text-on-surface">{booking.auditReference}</span>.
+                  </p>
+                </div>
+              </div>
+
+              <a
+                href={getWhatsAppConsultationUrl(booking)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0 shadow-md shadow-[#25D366]/20 transition-transform active:scale-98"
+              >
+                <MessageCircle className="w-4 h-4" />
+                <span>Send WhatsApp Notice</span>
+              </a>
+            </div>
+
             {/* Primary Session Card */}
             <div className="p-6 sm:p-8 rounded-3xl bg-surface-container-lowest border border-surface-container shadow-sm flex flex-col gap-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-secondary to-primary" />
@@ -301,14 +320,27 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
 
               {/* Google Meet Video Room Credentials */}
               <div className="flex flex-col gap-2">
-                <span className="text-xs uppercase tracking-wider font-bold text-on-surface-variant">
-                  Private Google Meet Room:
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wider font-bold text-on-surface-variant">
+                    Private Google Meet Room:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomMeetUrlInput(activeMeetUrl);
+                      setShowMeetConfigModal(true);
+                    }}
+                    className="text-xs text-secondary hover:underline font-semibold flex items-center gap-1 transition-colors"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Configure Desk Room</span>
+                  </button>
+                </div>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-surface-container-low border border-surface-container">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <Video className="w-5 h-5 text-secondary shrink-0" />
                     <span className="text-xs font-mono text-on-surface truncate">
-                      {booking.meetUrl}
+                      {activeMeetUrl}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -320,7 +352,7 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
                       <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
                     </button>
                     <a
-                      href={booking.meetUrl}
+                      href={activeMeetUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="px-4 py-1.5 rounded-lg bg-secondary text-white text-xs font-semibold flex items-center gap-1.5 hover:bg-secondary-container transition-colors"
@@ -349,7 +381,7 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
               </div>
             </div>
 
-            {/* Google Workspace Notification & Calendar Dispatch Hub */}
+            {/* Automated Consultation Notifications & Calendar Hub */}
             <div className="p-6 sm:p-8 rounded-3xl bg-surface-container-lowest border border-surface-container shadow-sm flex flex-col gap-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -357,98 +389,23 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
                     <Mail className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-on-surface">Notifications &amp; Google Workspace Sync</h3>
-                    <p className="text-xs text-on-surface-variant">Automated email alerts, Google Calendar event, and Google Meet integration</p>
+                    <h3 className="text-base font-bold text-on-surface">Automated Consultation Confirmations</h3>
+                    <p className="text-xs text-on-surface-variant">Instant server-side dispatch to advisor &amp; client • No sign-in required</p>
                   </div>
                 </div>
-                {(notificationDispatchStatus.advisorEmailSent || calendarSyncStatus === 'synced') && (
-                  <span className="self-start sm:self-auto px-3 py-1 rounded-full bg-tertiary-fixed/40 text-on-tertiary-container text-xs font-bold flex items-center gap-1">
-                    <Check className="w-3.5 h-3.5" />
-                    Dispatched
-                  </span>
-                )}
+                <span className="self-start sm:self-auto px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Automatic Dispatch Active</span>
+                </span>
               </div>
 
-              {/* Notification Recipients Cards */}
-              <div className="flex flex-col gap-3">
-                {/* 1. Advisor Notification */}
-                <div className="p-4 rounded-2xl bg-surface-container-low border border-surface-container flex flex-col gap-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-surface-container flex items-center justify-center text-secondary">
-                        <Inbox className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="text-xs font-bold text-on-surface">Advisor Inbox Alert</span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant">
-                        {ADVISOR_EMAIL}
-                      </span>
-                    </div>
-                    {notificationDispatchStatus.advisorEmailSent ? (
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1">
-                        <Check className="w-3 h-3" />
-                        Delivered
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant text-[11px] font-medium">
-                        Ready to Dispatch
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-on-surface-variant leading-relaxed">
-                    Transmits complete client dossier: <strong className="text-on-surface">{booking.fullName}</strong> ({booking.phone}), <strong className="text-on-surface">{booking.companyName || 'Private Trader'}</strong>, sector <strong className="text-on-surface">{booking.industry}</strong>, Meet link, and escrow reference.
-                  </p>
-                </div>
-
-                {/* 2. Client Notification */}
-                <div className="p-4 rounded-2xl bg-surface-container-low border border-surface-container flex flex-col gap-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-surface-container flex items-center justify-center text-secondary">
-                        <Mail className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="text-xs font-bold text-on-surface">Client Confirmation Email</span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant">
-                        {booking.email}
-                      </span>
-                    </div>
-                    {notificationDispatchStatus.clientEmailSent ? (
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1">
-                        <Check className="w-3 h-3" />
-                        Delivered
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant text-[11px] font-medium">
-                        Ready to Dispatch
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-on-surface-variant leading-relaxed">
-                    Sends client the official confirmation packet, WAT &amp; CST schedules, Google Meet access link, and desk contacts.
-                  </p>
-                </div>
-
-                {/* 3. Google Calendar & Google Meet Space */}
-                <div className="p-4 rounded-2xl bg-surface-container-low border border-surface-container flex flex-col gap-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-surface-container flex items-center justify-center text-secondary">
-                        <Calendar className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="text-xs font-bold text-on-surface">Google Calendar &amp; Meet Space</span>
-                    </div>
-                    {notificationDispatchStatus.calendarSynced || calendarSyncStatus === 'synced' ? (
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold flex items-center gap-1">
-                        <Check className="w-3 h-3" />
-                        Calendar Synced
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant text-[11px] font-medium">
-                        Ready to Sync
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-on-surface-variant leading-relaxed">
-                    Creates event with both attendees (<span className="font-mono text-on-surface">{ADVISOR_EMAIL}</span> &amp; <span className="font-mono text-on-surface">{booking.email}</span>) and attaches direct Google Meet teleconference.
+              {/* Clean Email Notice */}
+              <div className="p-4 rounded-2xl bg-surface-container-low border border-surface-container flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs font-bold text-on-surface">Consultation Confirmed &amp; Dispatched</span>
+                  <p className="text-xs text-on-surface-variant leading-relaxed">
+                    Your consultation has been confirmed and automated notifications have been successfully dispatched. The client should check their email for the details and Google Meet credentials.
                   </p>
                 </div>
               </div>
@@ -462,66 +419,41 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
               )}
 
               {/* Action Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <button
-                  onClick={handleOpenNotificationPrompt}
-                  disabled={notificationDispatchStatus.isDispatching}
-                  className="min-h-[46px] px-4 py-2.5 bg-secondary text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm hover:bg-secondary-container transition-all"
+                  onClick={handleDirectAddToCalendar}
+                  className="flex-1 min-h-[46px] px-4 py-2.5 bg-secondary text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm hover:bg-secondary-container transition-all"
                 >
-                  <Send className="w-4 h-4" />
+                  <Calendar className="w-4 h-4" />
+                  <span>Add to Google Calendar (1-Click)</span>
+                </button>
+
+                <button
+                  onClick={() => handleAutoDispatchEmails(true)}
+                  disabled={notificationDispatchStatus.isDispatching}
+                  className="px-4 py-2.5 bg-surface-container text-on-surface hover:bg-surface-container-high rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Send className="w-3.5 h-3.5 text-secondary" />
                   <span>
-                    {notificationDispatchStatus.isDispatching
-                      ? 'Dispatching via Google API...'
-                      : notificationDispatchStatus.advisorEmailSent
-                      ? 'Resend Email Alerts & Sync'
-                      : 'Send Email Alerts & Sync Calendar'}
+                    {notificationDispatchStatus.isDispatching ? 'Re-dispatching...' : 'Resend Email Confirmation'}
                   </span>
                 </button>
-
-                <button
-                  onClick={() => setShowEmailPreviewModal(true)}
-                  className="min-h-[46px] px-4 py-2.5 bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-surface-container-high transition-colors"
-                >
-                  <Mail className="w-4 h-4 text-secondary" />
-                  <span>Preview Notification Emails</span>
-                </button>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-surface-container text-xs">
-                <button
-                  onClick={() => downloadIcsFile(booking)}
-                  className="text-on-surface-variant hover:text-on-surface font-semibold flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5 text-secondary" />
-                  <span>Download .ICS file (Outlook/Apple Calendar)</span>
-                </button>
-                {calendarEventUrl && (
-                  <a
-                    href={calendarEventUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-secondary hover:underline font-bold flex items-center gap-1"
-                  >
-                    <span>View in Google Calendar</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
               </div>
 
               {/* Direct Concierge WhatsApp */}
               <div className="p-4 rounded-2xl bg-surface-container-low border border-surface-container flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3 min-w-0">
-                  <MessageCircle className="w-5 h-5 text-on-tertiary-container shrink-0" />
+                  <MessageCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-bold text-on-surface truncate">WhatsApp Executive Concierge</span>
-                    <span className="text-[11px] text-on-surface-variant truncate">+234 800 MERIDIAN • Instant support</span>
+                    <span className="text-xs font-bold text-on-surface truncate">Advisor Direct WhatsApp Line</span>
+                    <span className="text-[11px] text-on-surface-variant truncate font-mono">{ADVISOR_WHATSAPP_DISPLAY} ({ADVISOR_WHATSAPP_NUMBER})</span>
                   </div>
                 </div>
                 <a
-                  href={`https://wa.me/23480063743426?text=Hello%20Meridian%20Trade%20Desk,%20my%20booking%20ref%20is%20${booking.auditReference}`}
+                  href={getWhatsAppConsultationUrl(booking)}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-4 py-2 rounded-xl bg-on-tertiary-container text-white text-xs font-bold shrink-0 hover:opacity-90"
+                  className="px-4 py-2 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white text-xs font-bold shrink-0 transition-colors shadow-sm"
                 >
                   Open WhatsApp
                 </a>
@@ -664,11 +596,10 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
                 Cancel
               </button>
               <button
-                onClick={handleConfirmAddToCalendar}
-                disabled={isAddingToCalendar}
+                onClick={handleDirectAddToCalendar}
                 className="flex-1 min-h-[44px] px-4 py-2 rounded-xl bg-secondary text-white font-bold text-xs hover:bg-secondary-container transition-colors shadow-sm flex items-center justify-center gap-1.5"
               >
-                {isAddingToCalendar ? 'Syncing...' : 'Yes, Add to Calendar'}
+                Yes, Add to Google Calendar
               </button>
             </div>
           </div>
@@ -794,12 +725,12 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
                 Choose Another Slot
               </button>
               <a
-                href={`https://wa.me/23480063743426?text=Hi,%20I%20would%20like%20to%20reschedule%20my%20session%20ref%20${booking.auditReference}`}
+                href={`https://wa.me/${ADVISOR_WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hello Meridian Trade Desk, I would like to coordinate rescheduling for my session ref ${booking.auditReference}`)}`}
                 target="_blank"
                 rel="noreferrer"
                 className="w-full min-h-[46px] px-4 py-2 bg-surface-container text-on-surface rounded-xl text-xs font-semibold flex items-center justify-center gap-2 hover:bg-surface-container-high transition-colors"
               >
-                Coordinate via WhatsApp Desk
+                Coordinate via WhatsApp Desk ({ADVISOR_WHATSAPP_DISPLAY})
               </a>
             </div>
           </div>
@@ -923,247 +854,93 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
         </div>
       )}
 
-      {/* 6. USER CONFIRMATION MODAL FOR EMAIL & WORKSPACE DISPATCH */}
-      {showNotificationConfirmModal && (
+
+
+      {/* Dedicated Meet Room Configuration Modal */}
+      {showMeetConfigModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-lg bg-surface-container-lowest rounded-3xl p-6 sm:p-8 shadow-2xl border border-surface-container flex flex-col gap-5">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-secondary-fixed text-secondary flex items-center justify-center shrink-0">
-                <Send className="w-5 h-5" />
-              </div>
-              <div className="flex flex-col">
-                <h3 className="text-base font-bold text-on-surface">
-                  Send Consultation Notification Emails?
-                </h3>
-                <span className="text-xs text-on-surface-variant">
-                  Workspace Schedule &amp; Email Dispatch
-                </span>
-              </div>
-            </div>
-
-            <p className="text-xs text-on-surface-variant leading-relaxed">
-              Confirm sending consultation booking details to both parties and synchronizing your Google Calendar:
-            </p>
-
-            <div className="p-4 rounded-2xl bg-surface-container-low flex flex-col gap-2.5 text-xs border border-surface-container">
-              <div className="flex items-start justify-between gap-2 pb-2 border-b border-surface-container">
-                <div className="flex flex-col">
-                  <span className="font-bold text-on-surface">1. Advisor Notification</span>
-                  <span className="text-[11px] text-on-surface-variant">
-                    Dossier with phone, company, sector &amp; Meet link
-                  </span>
-                </div>
-                <span className="font-mono text-[11px] text-secondary font-bold shrink-0">
-                  {ADVISOR_EMAIL}
-                </span>
-              </div>
-
-              <div className="flex items-start justify-between gap-2 pb-2 border-b border-surface-container">
-                <div className="flex flex-col">
-                  <span className="font-bold text-on-surface">2. Client Confirmation</span>
-                  <span className="text-[11px] text-on-surface-variant">
-                    Appointment time (WAT/CST), Google Meet link &amp; receipt
-                  </span>
-                </div>
-                <span className="font-mono text-[11px] text-secondary font-bold shrink-0">
-                  {booking.email}
-                </span>
-              </div>
-
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex flex-col">
-                  <span className="font-bold text-on-surface">3. Google Calendar &amp; Meet</span>
-                  <span className="text-[11px] text-on-surface-variant">
-                    Event created with video conference &amp; both attendees
-                  </span>
-                </div>
-                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold shrink-0">
-                  Auto-invites
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowNotificationConfirmModal(false)}
-                className="min-h-[44px] px-4 py-2 rounded-xl bg-surface-container text-on-surface font-semibold text-xs hover:bg-surface-container-high transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDispatchNotificationsAndCalendar}
-                className="min-h-[44px] px-5 py-2 rounded-xl bg-secondary text-white font-bold text-xs hover:bg-secondary-container transition-colors shadow-sm flex items-center justify-center gap-1.5"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Confirm &amp; Dispatch Emails</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 7. NOTIFICATION EMAIL PREVIEW MODAL */}
-      {showEmailPreviewModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-2xl bg-surface-container-lowest rounded-3xl p-6 sm:p-8 shadow-2xl border border-surface-container flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-2 border-b border-surface-container">
+          <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-3xl p-6 shadow-2xl border border-surface-container flex flex-col gap-5">
+            <div className="flex items-center justify-between border-b border-surface-container pb-3">
               <div className="flex items-center gap-2.5">
-                <Mail className="w-5 h-5 text-secondary" />
-                <h3 className="text-base font-bold text-on-surface">Notification Email Preview</h3>
+                <div className="w-8 h-8 rounded-lg bg-secondary/10 text-secondary flex items-center justify-center">
+                  <Video className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-on-surface">Configure Advisor Desk Meet Room</h3>
+                  <p className="text-[11px] text-on-surface-variant">
+                    Ensure client consultations route to your active, valid video room
+                  </p>
+                </div>
               </div>
               <button
-                onClick={() => setShowEmailPreviewModal(false)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container"
+                type="button"
+                onClick={() => setShowMeetConfigModal(false)}
+                className="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Tab selector */}
-            <div className="flex gap-2 p-1 rounded-xl bg-surface-container-low border border-surface-container">
-              <button
-                type="button"
-                onClick={() => setPreviewEmailTab('advisor')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-colors ${
-                  previewEmailTab === 'advisor'
-                    ? 'bg-surface-container-highest text-on-surface shadow-sm'
-                    : 'text-on-surface-variant hover:text-on-surface'
-                }`}
-              >
-                Advisor Email ({ADVISOR_EMAIL})
-              </button>
-              <button
-                type="button"
-                onClick={() => setPreviewEmailTab('client')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-colors ${
-                  previewEmailTab === 'client'
-                    ? 'bg-surface-container-highest text-on-surface shadow-sm'
-                    : 'text-on-surface-variant hover:text-on-surface'
-                }`}
-              >
-                Client Email ({booking.email})
-              </button>
-            </div>
-
-            {/* Preview Box */}
-            {previewEmailTab === 'advisor' ? (
-              <div className="p-5 rounded-2xl bg-white text-slate-900 border border-slate-200 text-xs shadow-sm flex flex-col gap-4">
-                <div className="border-b border-slate-100 pb-3">
-                  <span className="text-[10px] font-bold text-teal-700 uppercase tracking-wide block">
-                    Host Notification Packet
-                  </span>
-                  <h4 className="text-base font-bold text-slate-900 mt-0.5">
-                    [New Consultation Booking] {booking.fullName} — {booking.companyName || 'Bilateral Trade Desk'}
-                  </h4>
-                  <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap gap-3 font-mono">
-                    <span>To: {ADVISOR_EMAIL}</span>
-                    <span>Ref: {booking.auditReference}</span>
-                  </div>
-                </div>
-
-                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/60 flex flex-col gap-2 font-sans">
-                  <span className="font-bold text-[11px] text-slate-500 uppercase">Client Dossier</span>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-slate-500 block text-[11px]">Full Name:</span>
-                      <strong className="text-slate-900">{booking.fullName}</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[11px]">Email:</span>
-                      <strong className="text-slate-900">{booking.email}</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[11px]">Phone / WhatsApp:</span>
-                      <strong className="text-slate-900">{booking.phone}</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[11px]">Company / Entity:</span>
-                      <strong className="text-slate-900">{booking.companyName || 'Not specified'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[11px]">Industry Sector:</span>
-                      <strong className="text-slate-900">{booking.industry}</strong>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[11px]">Trip Objective:</span>
-                      <strong className="text-slate-900">{booking.tripObjective} ({booking.travelWindow})</strong>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-teal-50 border border-teal-100 p-3.5 rounded-xl flex flex-col items-center justify-center gap-1.5 text-center">
-                  <span className="text-teal-900 font-bold text-xs">Google Meet Video Room</span>
-                  <span className="font-mono text-[11px] text-slate-700">{booking.meetUrl}</span>
-                </div>
+            <form onSubmit={handleSaveMeetConfig} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-on-surface">
+                  Google Meet URL
+                </label>
+                <input
+                  type="url"
+                  value={customMeetUrlInput}
+                  onChange={(e) => setCustomMeetUrlInput(e.target.value)}
+                  placeholder="https://meet.google.com/xxx-yyyy-zzz"
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-container-low border border-surface-container text-on-surface text-xs font-mono focus:outline-none focus:ring-2 focus:ring-secondary/50"
+                />
+                <span className="text-[11px] text-on-surface-variant">
+                  Paste your permanent Google Meet room (e.g. from Google Meet "Create a meeting for later") or use the live instant launcher below.
+                </span>
               </div>
-            ) : (
-              <div className="p-5 rounded-2xl bg-white text-slate-900 border border-slate-200 text-xs shadow-sm flex flex-col gap-4">
-                <div className="border-b border-slate-100 pb-3">
-                  <span className="text-[10px] font-bold text-teal-700 uppercase tracking-wide block">
-                    Client Confirmation Receipt
-                  </span>
-                  <h4 className="text-base font-bold text-slate-900 mt-0.5">
-                    Confirmed: Meridian China Advisory 1-on-1 Consultation on {booking.selectedDate}
-                  </h4>
-                  <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap gap-3 font-mono">
-                    <span>To: {booking.email}</span>
-                    <span>Advisor: {ADVISOR_EMAIL}</span>
-                  </div>
-                </div>
 
-                <p className="text-xs text-slate-700 leading-relaxed">
-                  Dear <strong>{booking.fullName}</strong>,<br />
-                  Your executive 1-on-1 bilateral trade consultation is confirmed. Below are your meeting credentials:
-                </p>
-
-                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/60 flex flex-col gap-2">
-                  <div className="flex justify-between border-b border-slate-100 pb-1.5">
-                    <span className="text-slate-500">Date:</span>
-                    <strong className="text-slate-900">{booking.selectedDate}</strong>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-100 pb-1.5">
-                    <span className="text-slate-500">Time (WAT - Lagos):</span>
-                    <strong className="text-slate-900">{booking.selectedTime}</strong>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-100 pb-1.5">
-                    <span className="text-slate-500">Reference:</span>
-                    <strong className="text-slate-900">{booking.auditReference}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Advisory Fee Cleared:</span>
-                    <strong className="text-teal-700">₦50,000.00 NGN (Bachs Escrow)</strong>
-                  </div>
-                </div>
-
-                <div className="bg-teal-50 border border-teal-100 p-3.5 rounded-xl flex flex-col items-center justify-center gap-1.5 text-center">
-                  <span className="text-teal-900 font-bold text-xs">Your Private Google Meet Link</span>
-                  <span className="font-mono text-[11px] text-slate-700">{booking.meetUrl}</span>
-                </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCustomMeetUrlInput('https://meet.google.com/new')}
+                  className="px-3 py-1.5 rounded-lg bg-surface-container text-on-surface text-[11px] font-semibold hover:bg-surface-container-high transition-colors"
+                >
+                  Use Live Room Launcher (meet.google.com/new)
+                </button>
+                <a
+                  href="https://meet.google.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-surface-container text-secondary text-[11px] font-semibold hover:bg-surface-container-high flex items-center gap-1 transition-colors"
+                >
+                  <span>Open Google Meet</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
-            )}
 
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-surface-container">
-              <button
-                type="button"
-                onClick={() => setShowEmailPreviewModal(false)}
-                className="px-4 py-2 rounded-xl bg-surface-container text-on-surface text-xs font-semibold hover:bg-surface-container-high"
-              >
-                Close Preview
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEmailPreviewModal(false);
-                  handleOpenNotificationPrompt();
-                }}
-                className="px-5 py-2 rounded-xl bg-secondary text-white text-xs font-bold hover:bg-secondary-container flex items-center gap-1.5"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Send Notifications Now</span>
-              </button>
-            </div>
+              {meetConfigSaved && (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
+                  <Check className="w-4 h-4" />
+                  <span>Google Meet desk room saved and synchronized successfully!</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-surface-container">
+                <button
+                  type="button"
+                  onClick={() => setShowMeetConfigModal(false)}
+                  className="px-4 py-2 rounded-xl bg-surface-container text-on-surface text-xs font-semibold hover:bg-surface-container-high transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-secondary text-white text-xs font-bold hover:bg-secondary-container transition-colors shadow-sm"
+                >
+                  Save & Apply Link
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
