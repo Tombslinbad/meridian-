@@ -230,6 +230,9 @@ router.get('/payments/bachs/verify-checkout/:checkoutId', async (req, res) => {
   }
 });
 
+import { db } from '../src/lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
+
 // Consultation Notification Dispatch (Automatic Server-Side Email Delivery)
 router.post('/notifications/consultation-booked', async (req, res) => {
   try {
@@ -237,6 +240,25 @@ router.post('/notifications/consultation-booked', async (req, res) => {
 
     if (!booking) {
       return res.status(400).json({ error: 'Missing booking payload' });
+    }
+
+    // Try to confirm the booking in Firestore
+    try {
+      if (booking.selectedDateIso && booking.selectedTime) {
+        const slotId = `${booking.selectedDateIso}_${booking.selectedTime.replace(/[\s:]/g, '')}`;
+        await setDoc(doc(db, 'bookings', slotId), {
+           dateIso: booking.selectedDateIso,
+           timeSlot: booking.selectedTime,
+           fullName: booking.fullName,
+           email: booking.email,
+           phone: booking.phone || '',
+           companyName: booking.companyName || '',
+           status: 'confirmed',
+           updatedAt: Date.now()
+        }, { merge: true });
+      }
+    } catch (dbErr) {
+      console.error('Failed to update Firestore booking:', dbErr);
     }
 
     const dispatchResult = await dispatchAutomaticEmails(booking, diagnostic);

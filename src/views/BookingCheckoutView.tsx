@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppTab, BookingDetails } from '../types';
 import { User } from 'firebase/auth';
-import { AdvisorCalendarModal } from '../components/AdvisorCalendarModal';
 import {
   fetchDayAvailability,
   fetchMonthOverview,
@@ -68,7 +67,6 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
   const [isLoadingAvailability, setIsLoadingAvailability] = useState<boolean>(false);
   const [calendarSynced, setCalendarSynced] = useState<boolean>(false);
   const [syncStatusMessage, setSyncStatusMessage] = useState<string>('');
-  const [isAdvisorModalOpen, setIsAdvisorModalOpen] = useState<boolean>(false);
 
   const [fieldErrors, setFieldErrors] = useState<{
     fullName?: string;
@@ -476,15 +474,6 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsAdvisorModalOpen(true)}
-                    className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-surface-container hover:bg-surface-container-high text-on-surface flex items-center gap-1 transition-colors"
-                    title="Configure Google Calendar synchronization"
-                  >
-                    <Calendar className="w-3.5 h-3.5 text-secondary" />
-                    <span>Advisor Calendar Sync</span>
-                  </button>
                   <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-tertiary-fixed/30 text-on-tertiary-container flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-on-tertiary-container animate-pulse" />
                     Live Desk
@@ -1195,18 +1184,6 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
           </div>
         </div>
       )}
-
-      {/* Advisor Google Calendar Sync Modal */}
-      <AdvisorCalendarModal
-        isOpen={isAdvisorModalOpen}
-        onClose={() => setIsAdvisorModalOpen(false)}
-        onAvailabilityUpdated={() => {
-          const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-          const iso = booking.selectedDateIso || `2026-10-${pad(selectedDayNumber)}`;
-          loadAvailabilityForDate(iso, true);
-          loadMonthOverview();
-        }}
-      />
     </div>
   );
 };

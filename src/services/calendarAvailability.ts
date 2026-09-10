@@ -1,3 +1,6 @@
+import { db } from '../lib/firebase';
+import { collection, query, where, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
+
 export interface SlotAvailability {
   slot: string;
   time24: string;
@@ -21,6 +24,62 @@ export interface DayAvailabilityResponse {
   };
 }
 
+export async function fetchDayAvailability(
+  dateIso: string,
+  refresh = false
+): Promise<DayAvailabilityResponse> {
+  try {
+    const q = query(collection(db, 'bookings'), where('dateIso', '==', dateIso));
+    const snap = await getDocs(q);
+    const bookedSlots = new Set<string>();
+    
+    snap.forEach(d => {
+      const data = d.data();
+      // If confirmed, or held within the last 15 minutes
+      if (data.status === 'confirmed' || (data.status === 'held' && Date.now() - data.createdAt < 15 * 60 * 1000)) {
+         bookedSlots.add(data.timeSlot);
+      }
+    });
+
+    const defaultSlots = [
+      { slot: '10:00 AM', time24: '10:00', startIso: '', endIso: '' },
+      { slot: '11:30 AM', time24: '11:30', startIso: '', endIso: '' },
+      { slot: '02:00 PM', time24: '14:00', startIso: '', endIso: '' },
+      { slot: '04:00 PM', time24: '16:00', startIso: '', endIso: '' },
+      { slot: '06:00 PM', time24: '18:00', startIso: '', endIso: '' },
+      { slot: '08:00 PM', time24: '20:00', startIso: '', endIso: '' },
+    ];
+
+    const slots: SlotAvailability[] = defaultSlots.map(s => ({
+      ...s,
+      available: !bookedSlots.has(s.slot),
+      status: bookedSlots.has(s.slot) ? 'booked_client' : 'available'
+    }));
+
+    return {
+      dateIso,
+      slots,
+      calendarSynced: false,
+      totalAvailable: slots.filter(s => s.available).length,
+      totalSlots: slots.length,
+      syncInfo: {
+        status: 'unconfigured',
+        message: 'Using direct Firestore booking ledger',
+      },
+    };
+  } catch (err: any) {
+    console.warn('Could not fetch server availability:', err);
+    return {
+      dateIso,
+      slots: [],
+      calendarSynced: false,
+      totalAvailable: 0,
+      totalSlots: 0,
+      syncInfo: { status: 'error', message: err.message },
+    };
+  }
+}
+
 export interface MonthOverviewResponse {
   year: number;
   month: number;
@@ -33,73 +92,8 @@ export interface MonthOverviewResponse {
   };
 }
 
-export interface AdvisorSettingsResponse {
-  advisorEmail: string;
-  googleCalendarIcalUrl?: string;
-  googleCalendarId?: string;
-  lastSyncedAt?: string | null;
-  syncStatus: 'connected' | 'error' | 'unconfigured';
-  syncMessage?: string;
-  eventsCount?: number;
-  workingHoursStart: string;
-  workingHoursEnd: string;
-  manualBlockedSlots: { dateIso: string; timeSlot: string; reason?: string }[];
-  manualBlockedDates: string[];
-  recentBookings?: {
-    id: string;
-    auditReference: string;
-    fullName: string;
-    email: string;
-    dateIso: string;
-    timeSlot: string;
-    status: string;
-    createdAt: string;
-  }[];
-}
-
-export async function fetchDayAvailability(
-  dateIso: string,
-  refresh = false
-): Promise<DayAvailabilityResponse> {
-  try {
-    const res = await fetch(`/api/calendar/availability?date=${encodeURIComponent(dateIso)}&refresh=${refresh}`);
-    if (!res.ok) {
-      throw new Error(`Availability status HTTP ${res.status}`);
-    }
-    return await res.json();
-  } catch (err: any) {
-    console.warn('Could not fetch server availability, falling back to local defaults:', err);
-    // Fallback if offline
-    return {
-      dateIso,
-      slots: [
-        { slot: '10:00 AM', time24: '10:00', startIso: '', endIso: '', available: true, status: 'available' },
-        { slot: '11:30 AM', time24: '11:30', startIso: '', endIso: '', available: true, status: 'available' },
-        { slot: '02:00 PM', time24: '14:00', startIso: '', endIso: '', available: true, status: 'available' },
-        { slot: '04:00 PM', time24: '16:00', startIso: '', endIso: '', available: true, status: 'available' },
-        { slot: '06:00 PM', time24: '18:00', startIso: '', endIso: '', available: true, status: 'available' },
-        { slot: '08:00 PM', time24: '20:00', startIso: '', endIso: '', available: true, status: 'available' },
-      ],
-      calendarSynced: false,
-      totalAvailable: 6,
-      totalSlots: 6,
-      syncInfo: {
-        status: 'unconfigured',
-        message: 'Running offline fallback',
-      },
-    };
-  }
-}
-
 export async function fetchMonthOverview(year = 2026, month = 10): Promise<MonthOverviewResponse> {
-  try {
-    const res = await fetch(`/api/calendar/month-overview?year=${year}&month=${month}`);
-    if (!res.ok) throw new Error(`Month overview HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.warn('Could not fetch month overview:', err);
-    return { year, month, overview: {} };
-  }
+  return { year, month, overview: {} };
 }
 
 export async function reserveSlotApi(data: {
@@ -111,49 +105,25 @@ export async function reserveSlotApi(data: {
   companyName?: string;
 }): Promise<{ success: boolean; holdId?: string; error?: string }> {
   try {
-    const res = await fetch('/api/calendar/reserve-slot', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      return { success: false, error: json.error || 'This slot is unavailable.' };
+    const slotId = `${data.dateIso}_${data.timeSlot.replace(/[\s:]/g, '')}`;
+    const slotRef = doc(db, 'bookings', slotId);
+    
+    const snap = await getDoc(slotRef);
+    if (snap.exists()) {
+      const slotData = snap.data();
+      if (slotData.status === 'confirmed' || (slotData.status === 'held' && Date.now() - slotData.createdAt < 15 * 60 * 1000)) {
+        return { success: false, error: 'This slot is already booked or held by another client.' };
+      }
     }
-    return json;
+
+    await setDoc(slotRef, {
+      ...data,
+      status: 'held',
+      createdAt: Date.now()
+    });
+
+    return { success: true, holdId: slotId };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Network error checking slot availability' };
   }
-}
-
-export async function fetchAdvisorSettings(): Promise<AdvisorSettingsResponse> {
-  const res = await fetch('/api/calendar/advisor-settings');
-  if (!res.ok) throw new Error('Failed to load advisor settings');
-  return await res.json();
-}
-
-export async function saveAdvisorSettings(
-  settings: Partial<AdvisorSettingsResponse>
-): Promise<{ success: boolean; settings: AdvisorSettingsResponse }> {
-  const res = await fetch('/api/calendar/advisor-settings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(settings),
-  });
-  if (!res.ok) throw new Error('Failed to save advisor settings');
-  return await res.json();
-}
-
-export async function testGoogleCalendarSync(icalUrl: string): Promise<{
-  success: boolean;
-  eventsCount: number;
-  message: string;
-  sampleEvents: { summary: string; start: string; end: string }[];
-}> {
-  const res = await fetch('/api/calendar/test-sync', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ icalUrl }),
-  });
-  return await res.json();
 }

@@ -57,7 +57,10 @@ interface CalendarLedgerData {
   bookings: ConfirmedBookingRecord[];
 }
 
-const LEDGER_FILE = path.join(process.cwd(), 'server', 'data', 'calendar_ledger.json');
+const isVercel = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_VERSION;
+const LEDGER_FILE = isVercel
+  ? path.join('/tmp', 'calendar_ledger.json')
+  : path.join(process.cwd(), 'server', 'data', 'calendar_ledger.json');
 
 // Memory cache for Google Calendar iCal events
 interface CachedEvents {
