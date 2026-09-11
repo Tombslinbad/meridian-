@@ -9,7 +9,7 @@ async function startServer() {
   const PORT = 3000;
 
   // Mount API endpoints
-  app.use('/', apiRouter);
+  app.use('/api', apiRouter);
 
   // Vite Middleware / Static Serving
   if (process.env.NODE_ENV !== 'production') {

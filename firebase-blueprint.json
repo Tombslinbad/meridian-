@@ -1,0 +1,21 @@
+{
+  "entities": {
+    "bookings": {
+      "title": "Booking",
+      "description": "Client consultation booking slot",
+      "type": "object",
+      "properties": {
+        "dateIso": { "type": "string" },
+        "timeSlot": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "companyName": { "type": "string" },
+        "status": { "type": "string", "enum": ["held", "confirmed", "cancelled"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["dateIso", "timeSlot", "status"]
+    }
+  }
+}

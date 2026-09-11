@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BookingDetails, DiagnosticData, AppTab } from '../types';
 import { User } from 'firebase/auth';
+import { db } from '../lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
 import {
   insertCalendarEventViaApi,
   generateGoogleCalendarUrl,
@@ -175,6 +177,28 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
     if (hasAutoDispatchedRef.current) return;
     hasAutoDispatchedRef.current = true;
     handleAutoDispatchEmails(false);
+
+    // Ensure slot status is permanently marked as confirmed in Firestore
+    if (booking.selectedDateIso && booking.selectedTime) {
+      const slotId = `${booking.selectedDateIso}_${booking.selectedTime.replace(/[\s:]/g, '')}`;
+      setDoc(
+        doc(db, 'bookings', slotId),
+        {
+          dateIso: booking.selectedDateIso,
+          timeSlot: booking.selectedTime,
+          fullName: booking.fullName || '',
+          email: booking.email || '',
+          phone: booking.phone || '',
+          companyName: booking.companyName || '',
+          status: 'confirmed',
+          auditReference: booking.auditReference || '',
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      ).catch((err) => {
+        console.warn('Could not confirm booking in Firestore client-side:', err);
+      });
+    }
   }, [booking.auditReference]);
 
   const handleDirectAddToCalendar = () => {

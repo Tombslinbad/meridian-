@@ -1,6 +1,6 @@
 import 'dotenv/config';
-import express from 'express';
-import { dispatchAutomaticEmails, ADVISOR_EMAIL } from '../server/emailDispatcher';
+import express, { Request, Response, NextFunction } from 'express';
+import { dispatchAutomaticEmails, ADVISOR_EMAIL } from './emailDispatcher';
 
 // Default sandbox key provided for Bachs.io payments
 const DEFAULT_BACHS_SANDBOX_KEY =
@@ -17,21 +17,54 @@ const getBachsBaseUrl = (apiKey: string): string => {
 };
 
 const app = express();
+
+// Enable standard JSON parsing
 app.use(express.json());
+
+// Enable permissive CORS for all clients and Vercel preview environments
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  next();
+});
+
+// Handle preflight requests gracefully
+app.options('*', (_req: Request, res: Response) => {
+  res.sendStatus(200);
+});
+
+// Normalize request URL in case Vercel rewrote the path
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  const forwardedUri = (req.headers['x-forwarded-uri'] || req.headers['x-matched-path']) as string;
+  if (forwardedUri && forwardedUri.startsWith('/api')) {
+    req.url = forwardedUri;
+  }
+  next();
+});
 
 const router = express.Router();
 
-// Health Check
-router.get('/health', (_req, res) => {
+// Root API Check
+router.get('/', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
-    service: 'Meridian China Advisory Desk - Vercel Serverless Payments API',
+    service: 'Meridian China Advisory Desk - Payments & Notifications Gateway',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Health Check
+router.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    service: 'Meridian China Advisory Desk - Payments & Notifications Gateway',
     timestamp: new Date().toISOString(),
   });
 });
 
 // Bachs Configuration info (public flags only, never the secret key)
-router.get('/payments/bachs/config', (_req, res) => {
+router.get('/payments/bachs/config', (_req: Request, res: Response) => {
   const key = getBachsApiKey();
   const isSandbox = key.startsWith('sk_sandbox_');
   res.json({
@@ -49,7 +82,7 @@ router.get('/payments/bachs/config', (_req, res) => {
 });
 
 // Create Bachs Checkout Session
-router.post('/payments/bachs/create-checkout', async (req, res) => {
+router.post('/payments/bachs/create-checkout', async (req: Request, res: Response) => {
   try {
     const apiKey = getBachsApiKey();
     if (!apiKey) {
@@ -72,7 +105,7 @@ router.post('/payments/bachs/create-checkout', async (req, res) => {
       currency = 'NGN',
       successUrl,
       cancelUrl,
-    } = req.body;
+    } = req.body || {};
 
     if (!customerEmail || !customerName) {
       return res.status(400).json({
@@ -173,7 +206,7 @@ router.post('/payments/bachs/create-checkout', async (req, res) => {
 });
 
 // Verify Bachs Checkout Session
-router.get('/payments/bachs/verify-checkout/:checkoutId', async (req, res) => {
+router.get('/payments/bachs/verify-checkout/:checkoutId', async (req: Request, res: Response) => {
   try {
     const apiKey = getBachsApiKey();
     const { checkoutId } = req.params;
@@ -230,35 +263,13 @@ router.get('/payments/bachs/verify-checkout/:checkoutId', async (req, res) => {
   }
 });
 
-import { db } from '../src/lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
-
 // Consultation Notification Dispatch (Automatic Server-Side Email Delivery)
-router.post('/notifications/consultation-booked', async (req, res) => {
+router.post('/notifications/consultation-booked', async (req: Request, res: Response) => {
   try {
     const { booking, diagnostic } = req.body || {};
 
     if (!booking) {
       return res.status(400).json({ error: 'Missing booking payload' });
-    }
-
-    // Try to confirm the booking in Firestore
-    try {
-      if (booking.selectedDateIso && booking.selectedTime) {
-        const slotId = `${booking.selectedDateIso}_${booking.selectedTime.replace(/[\s:]/g, '')}`;
-        await setDoc(doc(db, 'bookings', slotId), {
-           dateIso: booking.selectedDateIso,
-           timeSlot: booking.selectedTime,
-           fullName: booking.fullName,
-           email: booking.email,
-           phone: booking.phone || '',
-           companyName: booking.companyName || '',
-           status: 'confirmed',
-           updatedAt: Date.now()
-        }, { merge: true });
-      }
-    } catch (dbErr) {
-      console.error('Failed to update Firestore booking:', dbErr);
     }
 
     const dispatchResult = await dispatchAutomaticEmails(booking, diagnostic);
@@ -290,8 +301,23 @@ router.post('/notifications/consultation-booked', async (req, res) => {
   }
 });
 
-// Mount router on both /api and / to handle Vercel rewrites gracefully
+// Mount router on both /api and / so routes match whether called with or without /api prefix
 app.use('/api', router);
 app.use('/', router);
+
+// Catch-all 404 for unhandled API endpoints
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
+    error: `Endpoint not found: ${req.method} ${req.originalUrl || req.url}`,
+  });
+});
+
+// Global Error Handler to guarantee clean JSON response on any unexpected error
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[API Gateway Error]:', err);
+  res.status(500).json({
+    error: err?.message || 'Internal Server Error in API Gateway',
+  });
+});
 
 export default app;
