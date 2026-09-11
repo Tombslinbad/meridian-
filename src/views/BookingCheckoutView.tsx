@@ -360,6 +360,11 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
         data = await res.json();
       } else {
         const rawText = await res.text();
+        if (rawText.includes('FUNCTION_INVOCATION_FAILED')) {
+          throw new Error(
+            'Vercel serverless function invocation error. Please trigger a redeploy of your project on Vercel so the updated API gateway and routing rules take effect.'
+          );
+        }
         if (res.status === 404 || rawText.includes('The page could not be found') || rawText.includes('<!DOCTYPE html>')) {
           throw new Error(
             'Payment API route not found (404). If deployed on Vercel, ensure the /api serverless function is deployed with vercel.json and BACHS_API_KEY is configured in Vercel Environment Variables.'

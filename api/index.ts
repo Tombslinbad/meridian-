@@ -1,8 +1,13 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
-import { dispatchAutomaticEmails, ADVISOR_EMAIL } from './emailDispatcher';
 
-// Default sandbox key provided for Bachs.io payments
+// ============================================================================
+// CONSTANTS & ENVIRONMENT ACCESS
+// ============================================================================
+export const ADVISOR_EMAIL = 'igwev2956@gmail.com';
+export const CLIENT_SENDER_EMAIL = 'meridianadvisory@verifieduni.com';
+export const ADVISOR_NOTIFICATION_SENDER_EMAIL = 'notifications@verifieduni.com';
+
 const DEFAULT_BACHS_SANDBOX_KEY =
   'sk_sandbox_757c6cfc_lJCFv9m9v8fS_dgS77H_qCFgHsuRVoCH5kFKn8dAc3E';
 
@@ -16,12 +21,413 @@ const getBachsBaseUrl = (apiKey: string): string => {
     : 'https://api.bachs.io/v1';
 };
 
+// ============================================================================
+// EMAIL DISPATCHER INTERFACES & HELPERS
+// ============================================================================
+export interface BookingPayload {
+  auditReference: string;
+  fullName: string;
+  email: string;
+  phone?: string;
+  companyName?: string;
+  industry: string;
+  tripObjective: string;
+  travelWindow: string;
+  selectedDate: string;
+  selectedDateIso: string;
+  selectedTime: string;
+  amountNgn: number;
+  meetUrl: string;
+}
+
+export interface DiagnosticPayload {
+  hsCodesOrUrls?: string;
+  orderSizing?: string;
+  currentRoadblocks?: string;
+}
+
+export interface DispatchResult {
+  success: boolean;
+  advisorSent: boolean;
+  clientSent: boolean;
+  mode: 'resend' | 'smtp' | 'simulated';
+  error?: string;
+  clientError?: string;
+  advisorError?: string;
+  clientMessageId?: string;
+  advisorMessageId?: string;
+  senders?: {
+    client: string;
+    advisor: string;
+  };
+  timestamp: string;
+}
+
+const buildClientEmailHtml = (booking: BookingPayload, diagnostic?: DiagnosticPayload): string => {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Consultation Confirmation - Meridian China Advisory</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }
+    .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; }
+    .header { background: #0f172a; padding: 32px 28px; text-align: left; }
+    .header h1 { color: #f8fafc; font-size: 20px; margin: 0 0 6px; font-weight: 700; letter-spacing: -0.02em; }
+    .header p { color: #94a3b8; font-size: 13px; margin: 0; }
+    .content { padding: 32px 28px; }
+    .status-badge { display: inline-block; background: #ecfdf5; color: #059669; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; }
+    .box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0; }
+    .grid { width: 100%; border-collapse: collapse; }
+    .grid td { padding: 8px 0; font-size: 13px; vertical-align: top; }
+    .label { color: #64748b; font-weight: 500; width: 35%; }
+    .val { color: #0f172a; font-weight: 600; }
+    .btn { display: inline-block; background: #0d9488; color: #ffffff !important; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; font-size: 14px; margin: 16px 0 8px; text-align: center; }
+    .footer { padding: 24px 28px; background: #f1f5f9; text-align: center; font-size: 12px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>MERIDIAN CHINA ADVISORY</h1>
+      <p>Bilateral Trade &amp; Canton Fair Strategic Desk</p>
+    </div>
+    <div class="content">
+      <div class="status-badge">Payment Confirmed &bull; Slot Secured</div>
+      <h2 style="font-size: 18px; margin: 0 0 12px; color: #0f172a;">Executive Consultation Confirmed</h2>
+      <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 20px;">
+        Dear <strong>${booking.fullName}</strong>, your private 1-on-1 strategic trade consultation has been confirmed. Below are your meeting credentials, access link, and reference details.
+      </p>
+
+      <div class="box">
+        <table class="grid">
+          <tr>
+            <td class="label">Reference:</td>
+            <td class="val" style="font-family: monospace;">${booking.auditReference}</td>
+          </tr>
+          <tr>
+            <td class="label">Session Date:</td>
+            <td class="val">${booking.selectedDate}</td>
+          </tr>
+          <tr>
+            <td class="label">Session Time:</td>
+            <td class="val">${booking.selectedTime} (West Africa Time / UTC+1)</td>
+          </tr>
+          <tr>
+            <td class="label">Assigned Desk:</td>
+            <td class="val">Director, Bilateral Trade Desk (Senior Trade Envoy)</td>
+          </tr>
+          <tr>
+            <td class="label">Target Focus:</td>
+            <td class="val">${booking.industry} &bull; ${booking.tripObjective}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="text-align: center; margin: 24px 0;">
+        <a href="${booking.meetUrl}" class="btn" target="_blank">Join Google Meet Consultation</a>
+        <div style="font-size: 11px; color: #64748b; margin-top: 6px; font-family: monospace;">
+          ${booking.meetUrl}
+        </div>
+      </div>
+
+      ${
+        diagnostic?.hsCodesOrUrls || diagnostic?.currentRoadblocks
+          ? `
+      <div class="box" style="background: #f0fdfa; border-color: #ccfbf1;">
+        <h4 style="margin: 0 0 8px; font-size: 12px; color: #0f766e; text-transform: uppercase;">Trade Dossier Notes</h4>
+        <p style="margin: 0; font-size: 12px; color: #134e4a;">${diagnostic.currentRoadblocks || diagnostic.hsCodesOrUrls}</p>
+      </div>`
+          : ''
+      }
+
+      <p style="font-size: 13px; color: #64748b; line-height: 1.5;">
+        <strong>Advisory Preparation Checklist:</strong><br>
+        Please have any factory proforma invoices, supplier quotation links (1688 / Alibaba / Made-in-China), or target HS codes accessible during the session.<br>
+        Direct WhatsApp Advisor Line: <a href="https://wa.me/2349065839680" style="color: #0d9488; font-weight: bold;">+234 906 583 9680</a>
+      </p>
+    </div>
+    <div class="footer">
+      Meridian China Advisory &bull; Bilateral Trade Intelligence Desk<br>
+      WhatsApp: +234 906 583 9680 &bull; Support: <a href="mailto:${CLIENT_SENDER_EMAIL}" style="color: #0d9488;">${CLIENT_SENDER_EMAIL}</a>
+    </div>
+  </div>
+</body>
+</html>
+`;
+};
+
+const buildAdvisorEmailHtml = (booking: BookingPayload, diagnostic?: DiagnosticPayload): string => {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>New Consultation Booking - Meridian China Advisory</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; margin: 0; padding: 24px; color: #0f172a; }
+    .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; }
+    .header { background: #1e293b; padding: 24px; color: #f8fafc; }
+    .content { padding: 28px; }
+    .box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin: 16px 0; }
+    .btn { display: inline-block; background: #0d9488; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 700; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2 style="margin: 0; font-size: 18px;">[New Booking] ${booking.fullName}</h2>
+      <p style="margin: 4px 0 0; font-size: 12px; color: #94a3b8;">Ref: ${booking.auditReference}</p>
+    </div>
+    <div class="content">
+      <p style="margin-top: 0; font-size: 14px;">A new bilateral trade consultation has been booked and confirmed via Bachs.io.</p>
+
+      <div class="box">
+        <h4 style="margin: 0 0 10px; font-size: 12px; color: #64748b; text-transform: uppercase;">Client Profile</h4>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Name:</strong> ${booking.fullName}</p>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Email:</strong> ${booking.email}</p>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Phone:</strong> ${booking.phone || 'Not provided'}</p>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Company:</strong> ${booking.companyName || 'Private Trader'}</p>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Industry:</strong> ${booking.industry}</p>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Objective:</strong> ${booking.tripObjective} (${booking.travelWindow})</p>
+      </div>
+
+      <div class="box">
+        <h4 style="margin: 0 0 10px; font-size: 12px; color: #64748b; text-transform: uppercase;">Appointment Schedule</h4>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Date:</strong> ${booking.selectedDate}</p>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Time:</strong> ${booking.selectedTime} (WAT)</p>
+        <p style="margin: 4px 0; font-size: 13px;"><strong>Fee Paid:</strong> &#8358;${(booking.amountNgn || 50000).toLocaleString()}</p>
+      </div>
+
+      ${
+        diagnostic?.currentRoadblocks || diagnostic?.hsCodesOrUrls
+          ? `
+      <div class="box" style="background: #fefce8; border-color: #fef08a;">
+        <h4 style="margin: 0 0 6px; font-size: 12px; color: #854d0e; text-transform: uppercase;">Diagnostic Input</h4>
+        <p style="margin: 0; font-size: 13px; color: #713f12;">${diagnostic.currentRoadblocks || ''} ${diagnostic.hsCodesOrUrls || ''}</p>
+      </div>`
+          : ''
+      }
+
+      <div style="margin: 20px 0;">
+        <a href="${booking.meetUrl}" class="btn" target="_blank">Open Consultation Video Room</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+`;
+};
+
+export const dispatchAutomaticEmails = async (
+  booking: BookingPayload,
+  diagnostic?: DiagnosticPayload
+): Promise<DispatchResult> => {
+  const timestamp = new Date().toISOString();
+
+  const clientSenderFormatted =
+    process.env.RESEND_CLIENT_FROM_EMAIL?.trim() ||
+    `Meridian China Advisory <${CLIENT_SENDER_EMAIL}>`;
+
+  const advisorSenderFormatted =
+    process.env.RESEND_ADVISOR_FROM_EMAIL?.trim() ||
+    `Meridian Advisory Notifications <${ADVISOR_NOTIFICATION_SENDER_EMAIL}>`;
+
+  const clientEmail = (booking.email || '').trim().toLowerCase();
+  const advisorEmail = (ADVISOR_EMAIL || '').trim().toLowerCase();
+
+  console.log(`[Email Dispatcher] Initiating dispatch for booking ${booking.auditReference}:`, {
+    clientRecipient: clientEmail,
+    clientSender: clientSenderFormatted,
+    advisorRecipient: advisorEmail,
+    advisorSender: advisorSenderFormatted,
+  });
+
+  // 1. Primary Engine: Resend REST API
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  if (resendApiKey) {
+    try {
+      let clientSent = false;
+      let clientError: string | undefined;
+      let clientMessageId: string | undefined;
+
+      let advisorSent = false;
+      let advisorError: string | undefined;
+      let advisorMessageId: string | undefined;
+
+      if (clientEmail && clientEmail.includes('@')) {
+        try {
+          const clientRes = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${resendApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: clientSenderFormatted,
+              to: [clientEmail],
+              reply_to: CLIENT_SENDER_EMAIL,
+              subject: `[Booking Confirmed] China Trade Consultation — Ref: ${booking.auditReference}`,
+              html: buildClientEmailHtml(booking, diagnostic),
+            }),
+          });
+
+          if (clientRes.ok) {
+            const clientData: any = await clientRes.json().catch(() => ({}));
+            clientSent = true;
+            clientMessageId = clientData?.id;
+          } else {
+            clientError = await clientRes.text();
+            console.error('[Email Dispatch Error] Resend client email error:', clientError);
+          }
+        } catch (err: any) {
+          clientError = err?.message || 'Network failure sending client email';
+          console.error('[Email Dispatch Error] Client dispatch exception:', err);
+        }
+      } else {
+        clientError = `Invalid client email address: "${booking.email}"`;
+      }
+
+      try {
+        const advisorRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${resendApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: advisorSenderFormatted,
+            to: [advisorEmail],
+            reply_to: clientEmail || CLIENT_SENDER_EMAIL,
+            subject: `[New Consultation Booking] ${booking.fullName} — Ref: ${booking.auditReference}`,
+            html: buildAdvisorEmailHtml(booking, diagnostic),
+          }),
+        });
+
+        if (advisorRes.ok) {
+          const advisorData: any = await advisorRes.json().catch(() => ({}));
+          advisorSent = true;
+          advisorMessageId = advisorData?.id;
+        } else {
+          advisorError = await advisorRes.text();
+          console.error('[Email Dispatch Error] Resend advisor alert error:', advisorError);
+        }
+      } catch (err: any) {
+        advisorError = err?.message || 'Network failure sending advisor alert';
+        console.error('[Email Dispatch Error] Advisor dispatch exception:', err);
+      }
+
+      return {
+        success: clientSent && advisorSent,
+        clientSent,
+        advisorSent,
+        clientError,
+        advisorError,
+        clientMessageId,
+        advisorMessageId,
+        mode: 'resend',
+        senders: {
+          client: clientSenderFormatted,
+          advisor: advisorSenderFormatted,
+        },
+        timestamp,
+      };
+    } catch (err: any) {
+      console.warn('[Email Dispatch] Resend provider failed, falling back to SMTP:', err);
+    }
+  }
+
+  // 2. Secondary Engine: SMTP via dynamic nodemailer import (lazy-loaded so it never blocks startup)
+  const smtpHost = process.env.SMTP_HOST?.trim();
+  const smtpUser = (process.env.SMTP_USER || process.env.GMAIL_USER)?.trim();
+  const smtpPass = (process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD)?.trim();
+
+  if (smtpUser && smtpPass) {
+    try {
+      const nodemailer = (await import('nodemailer')).default;
+      const transporter = nodemailer.createTransport({
+        host: smtpHost || 'smtp.gmail.com',
+        port: Number(process.env.SMTP_PORT) || 465,
+        secure: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) === 465 : true,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      let clientSent = false;
+      let clientError: string | undefined;
+      let advisorSent = false;
+      let advisorError: string | undefined;
+
+      try {
+        await transporter.sendMail({
+          from: `"Meridian China Advisory" <${CLIENT_SENDER_EMAIL}>`,
+          to: clientEmail,
+          replyTo: CLIENT_SENDER_EMAIL,
+          subject: `[Booking Confirmed] China Trade Consultation — Ref: ${booking.auditReference}`,
+          html: buildClientEmailHtml(booking, diagnostic),
+        });
+        clientSent = true;
+      } catch (e: any) {
+        clientError = e?.message || 'SMTP client send failed';
+      }
+
+      try {
+        await transporter.sendMail({
+          from: `"Meridian Advisory Notifications" <${ADVISOR_NOTIFICATION_SENDER_EMAIL}>`,
+          to: advisorEmail,
+          replyTo: clientEmail || CLIENT_SENDER_EMAIL,
+          subject: `[New Consultation Booking] ${booking.fullName} — Ref: ${booking.auditReference}`,
+          html: buildAdvisorEmailHtml(booking, diagnostic),
+        });
+        advisorSent = true;
+      } catch (e: any) {
+        advisorError = e?.message || 'SMTP advisor send failed';
+      }
+
+      return {
+        success: clientSent && advisorSent,
+        advisorSent,
+        clientSent,
+        clientError,
+        advisorError,
+        mode: 'smtp',
+        senders: {
+          client: `"Meridian China Advisory" <${CLIENT_SENDER_EMAIL}>`,
+          advisor: `"Meridian Advisory Notifications" <${ADVISOR_NOTIFICATION_SENDER_EMAIL}>`,
+        },
+        timestamp,
+      };
+    } catch (err: any) {
+      console.warn('[Email Dispatch] SMTP failed:', err);
+    }
+  }
+
+  // 3. Fallback simulation mode
+  return {
+    success: false,
+    advisorSent: false,
+    clientSent: false,
+    clientError: 'Neither RESEND_API_KEY nor SMTP credentials configured on server',
+    advisorError: 'Neither RESEND_API_KEY nor SMTP credentials configured on server',
+    mode: 'simulated',
+    senders: {
+      client: clientSenderFormatted,
+      advisor: advisorSenderFormatted,
+    },
+    timestamp,
+  };
+};
+
+// ============================================================================
+// EXPRESS APP CREATION & CONFIGURATION
+// ============================================================================
 const app = express();
 
-// Enable standard JSON parsing
 app.use(express.json());
 
-// Enable permissive CORS for all clients and Vercel preview environments
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -29,23 +435,30 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Handle preflight requests gracefully
 app.options('*', (_req: Request, res: Response) => {
   res.sendStatus(200);
 });
 
-// Normalize request URL in case Vercel rewrote the path
+// Normalize request URL across local development and Vercel Serverless Function rewrites
 app.use((req: Request, _res: Response, next: NextFunction) => {
-  const forwardedUri = (req.headers['x-forwarded-uri'] || req.headers['x-matched-path']) as string;
-  if (forwardedUri && forwardedUri.startsWith('/api')) {
-    req.url = forwardedUri;
+  const queryRoute = req.query.__route as string;
+  if (queryRoute) {
+    req.url = queryRoute.startsWith('/') ? queryRoute : `/${queryRoute}`;
+  } else {
+    const forwardedUri = (req.headers['x-forwarded-uri'] || req.headers['x-matched-path'] || req.headers['x-invoke-path']) as string;
+    if (forwardedUri) {
+      req.url = forwardedUri;
+    }
   }
   next();
 });
 
+// ============================================================================
+// API ROUTES
+// ============================================================================
 const router = express.Router();
 
-// Root API Check
+// Root check
 router.get('/', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
@@ -54,7 +467,7 @@ router.get('/', (_req: Request, res: Response) => {
   });
 });
 
-// Health Check
+// Health check
 router.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
@@ -63,7 +476,7 @@ router.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-// Bachs Configuration info (public flags only, never the secret key)
+// Bachs Configuration
 router.get('/payments/bachs/config', (_req: Request, res: Response) => {
   const key = getBachsApiKey();
   const isSandbox = key.startsWith('sk_sandbox_');
@@ -116,7 +529,6 @@ router.post('/payments/bachs/create-checkout', async (req: Request, res: Respons
     const baseUrl = getBachsBaseUrl(apiKey);
     const reference = `MCA-BCHS-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // Resolve publicly accessible URL
     const publicBaseUrl = (() => {
       if (process.env.APP_URL && !process.env.APP_URL.includes('localhost') && process.env.APP_URL.startsWith('http')) {
         return process.env.APP_URL.replace(/\/$/, '');
@@ -263,7 +675,7 @@ router.get('/payments/bachs/verify-checkout/:checkoutId', async (req: Request, r
   }
 });
 
-// Consultation Notification Dispatch (Automatic Server-Side Email Delivery)
+// Automated Notification Route
 router.post('/notifications/consultation-booked', async (req: Request, res: Response) => {
   try {
     const { booking, diagnostic } = req.body || {};
@@ -301,7 +713,7 @@ router.post('/notifications/consultation-booked', async (req: Request, res: Resp
   }
 });
 
-// Mount router on both /api and / so routes match whether called with or without /api prefix
+// Mount router on both /api and / so all paths resolve consistently
 app.use('/api', router);
 app.use('/', router);
 
@@ -312,12 +724,14 @@ app.use((req: Request, res: Response) => {
   });
 });
 
-// Global Error Handler to guarantee clean JSON response on any unexpected error
+// Global Error Handler
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[API Gateway Error]:', err);
-  res.status(500).json({
-    error: err?.message || 'Internal Server Error in API Gateway',
-  });
+  if (!res.headersSent) {
+    res.status(500).json({
+      error: err?.message || 'Internal Server Error in API Gateway',
+    });
+  }
 });
 
 export default app;
