@@ -20,6 +20,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { WhatsAppQualificationModal } from '../components/WhatsAppQualificationModal';
+import { WhatsAppIcon } from '../components/WhatsAppIcon';
 import { trackInitiateCheckout } from '../lib/analytics';
 
 interface TradeIntelligenceViewProps {
@@ -60,7 +61,7 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
             {/* Left Column: Direct Value Proposition & Action */}
-            <div className="lg:col-span-7 flex flex-col items-start gap-6">
+            <div className="lg:col-span-7 flex flex-col items-start gap-6 min-w-0 w-full">
               {/* Category Pill */}
               <div className="inline-flex items-center gap-2 py-1.5 px-3.5 rounded-full bg-surface-container-high text-on-surface text-xs font-semibold shadow-xs border border-surface-container">
                 <span className="text-secondary font-bold">Nigeria ⇄ China</span>
@@ -100,10 +101,10 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
               </div>
 
               {/* Landing Page Dual Paths: Primary & Secondary */}
-              <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-1">
+              <div className="w-full flex flex-col sm:flex-row lg:flex-col xl:flex-row items-stretch sm:items-center lg:items-stretch xl:items-center gap-3 pt-1">
                 <button
                   onClick={handleBookNow}
-                  className="min-h-[48px] sm:min-h-[52px] px-5 sm:px-7 py-3 sm:py-3.5 bg-secondary text-on-secondary rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2 sm:gap-3 shadow-lg shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98"
+                  className="min-h-[48px] sm:min-h-[52px] px-5 sm:px-6 py-3 sm:py-3.5 bg-secondary text-on-secondary rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2 sm:gap-2.5 shadow-lg shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98 shrink-0 text-center"
                 >
                   <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-white/90 shrink-0" />
                   <span className="whitespace-nowrap">Book Your ₦50,000 Consultation</span>
@@ -112,10 +113,12 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsQualificationOpen(true)}
-                  className="min-h-[48px] sm:min-h-[52px] px-4 sm:px-6 py-3 sm:py-3.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 border border-surface-container hover:border-secondary/40 transition-all active:scale-98 whitespace-nowrap shadow-xs"
+                  className="min-h-[48px] sm:min-h-[52px] px-4 sm:px-5 py-3 sm:py-3.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold text-xs sm:text-sm flex items-center justify-center gap-2.5 border border-surface-container hover:border-emerald-500/40 transition-all active:scale-98 shadow-xs"
                 >
-                  <HelpCircle className="w-4 h-4 text-secondary shrink-0" />
-                  <span>Have Questions? Check If We're a Fit</span>
+                  <span className="w-6 h-6 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-600 shrink-0">
+                    <WhatsAppIcon className="w-3.5 h-3.5 fill-emerald-600" />
+                  </span>
+                  <span className="truncate sm:whitespace-nowrap">Have Questions? Check If We're a Fit</span>
                 </button>
               </div>
 
@@ -149,7 +152,7 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
             </div>
 
             {/* Right Column: Visual Strategy Presentation */}
-            <div className="lg:col-span-5 flex flex-col gap-4">
+            <div className="lg:col-span-5 flex flex-col gap-4 min-w-0 w-full">
               <div className="relative w-full rounded-3xl overflow-hidden shadow-xl border border-surface-container bg-surface-container-lowest">
                 <img
                   alt="China Business Strategy & Planning"
@@ -782,10 +785,10 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
             <span className="text-on-tertiary-container font-bold">100% Credited Toward Future Services</span>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto pt-2">
+          <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3 w-full sm:w-auto pt-2">
             <button
               onClick={handleBookNow}
-              className="w-full sm:w-auto min-h-[48px] sm:min-h-[54px] px-6 sm:px-9 py-3 sm:py-3.5 bg-secondary text-on-secondary rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-xl shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98"
+              className="w-full sm:w-auto min-h-[48px] sm:min-h-[54px] px-6 sm:px-8 py-3 sm:py-3.5 bg-secondary text-on-secondary rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-xl shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98"
             >
               <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-white/90 shrink-0" />
               <span className="whitespace-nowrap">Book Your ₦50,000 Consultation</span>
@@ -794,9 +797,11 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
             <button
               type="button"
               onClick={() => setIsQualificationOpen(true)}
-              className="w-full sm:w-auto min-h-[48px] sm:min-h-[54px] px-5 sm:px-7 py-3 sm:py-3.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 border border-surface-container hover:border-secondary/40 transition-all active:scale-98"
+              className="w-full sm:w-auto min-h-[48px] sm:min-h-[54px] px-5 sm:px-6 py-3 sm:py-3.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold text-xs sm:text-sm flex items-center justify-center gap-2.5 border border-surface-container hover:border-emerald-500/40 transition-all active:scale-98 shadow-xs"
             >
-              <HelpCircle className="w-4 h-4 text-secondary shrink-0" />
+              <span className="w-6 h-6 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-600 shrink-0">
+                <WhatsAppIcon className="w-3.5 h-3.5 fill-emerald-600" />
+              </span>
               <span className="whitespace-nowrap">Have Questions? Check If We're a Fit</span>
             </button>
           </div>
