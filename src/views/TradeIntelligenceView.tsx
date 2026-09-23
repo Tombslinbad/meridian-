@@ -16,8 +16,11 @@ import {
   Building,
   AlertCircle,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  MessageSquare
 } from 'lucide-react';
+import { WhatsAppQualificationModal } from '../components/WhatsAppQualificationModal';
+import { trackInitiateCheckout } from '../lib/analytics';
 
 interface TradeIntelligenceViewProps {
   onNavigate: (tab: AppTab) => void;
@@ -28,12 +31,14 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
   onNavigate,
 }) => {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [isQualificationOpen, setIsQualificationOpen] = useState(false);
 
   const toggleFaq = (index: number) => {
     setOpenFaqIndex(openFaqIndex === index ? null : index);
   };
 
   const handleBookNow = () => {
+    trackInitiateCheckout(50000);
     onNavigate('booking');
   };
 
@@ -45,7 +50,7 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col w-full text-on-surface bg-surface relative">
+    <div className="flex flex-col w-full text-on-surface bg-surface relative pb-32 md:pb-0">
       {/* 1. HERO SECTION */}
       <section className="relative w-full overflow-hidden pt-8 sm:pt-14 pb-16 sm:pb-24 border-b border-surface-container/80">
         {/* Soft Ambient Background Highlights */}
@@ -94,22 +99,35 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
                 </div>
               </div>
 
-              {/* CTA Buttons */}
+              {/* Landing Page Dual Paths: Primary & Secondary */}
               <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-1">
                 <button
                   onClick={handleBookNow}
-                  className="min-h-[46px] sm:min-h-[52px] px-4 sm:px-7 py-2.5 sm:py-3.5 bg-secondary text-on-secondary rounded-xl font-semibold text-sm sm:text-base flex items-center justify-center gap-2 sm:gap-3 shadow-lg shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98"
+                  className="min-h-[48px] sm:min-h-[52px] px-5 sm:px-7 py-3 sm:py-3.5 bg-secondary text-on-secondary rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2 sm:gap-3 shadow-lg shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98"
                 >
                   <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-white/90 shrink-0" />
-                  <span className="whitespace-nowrap">Book Consultation — ₦50,000</span>
+                  <span className="whitespace-nowrap">Book Your ₦50,000 Consultation</span>
                   <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 text-white/90 shrink-0" />
                 </button>
                 <button
-                  onClick={() => scrollToSection('whats-included')}
-                  className="min-h-[46px] sm:min-h-[50px] px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl text-on-surface font-medium text-xs sm:text-sm flex items-center justify-center gap-2 hover:bg-surface-container transition-colors border border-surface-container sm:border-transparent whitespace-nowrap"
+                  type="button"
+                  onClick={() => setIsQualificationOpen(true)}
+                  className="min-h-[48px] sm:min-h-[52px] px-4 sm:px-6 py-3 sm:py-3.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 border border-surface-container hover:border-secondary/40 transition-all active:scale-98 whitespace-nowrap shadow-xs"
                 >
-                  <span>See What’s Included</span>
-                  <ChevronDown className="w-4 h-4 text-secondary shrink-0" />
+                  <HelpCircle className="w-4 h-4 text-secondary shrink-0" />
+                  <span>Have Questions? Check If We're a Fit</span>
+                </button>
+              </div>
+
+              {/* Supporting link */}
+              <div className="flex items-center gap-4 text-xs text-on-surface-variant pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => scrollToSection('whats-included')}
+                  className="inline-flex items-center gap-1 hover:text-secondary transition-colors font-medium underline underline-offset-4"
+                >
+                  <span>See what's included in the 60-min session</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-secondary shrink-0" />
                 </button>
               </div>
 
@@ -136,7 +154,7 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
                 <img
                   alt="China Business Strategy & Planning"
                   className="w-full h-72 sm:h-84 object-cover"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuADOer4UaN8rXLDR6yvNBI8SGzwc6U6o4lBx_lKZBuIpNQnN4K_Ic3jbEojlZDFyF6y49KtWuSL8FVwQ5bYkPb4WYyiMVkH3rJpxLxjckhQc8IfBFJXkeRxH13SQWtSS1lOlDCKE1eK5M5Rz0SPEfHW90Sr2V54go-PJmMMbkLh16KmemuqcSIaYYACpD2YX7ldDyiCZMvksu9PDwxni5j_kfQQDcZPw6qbqUfNi7N1ZGA1oarVoZ14"
+                  src="/hero-strategy.jpg"
                 />
 
                 {/* Information Overlay */}
@@ -764,14 +782,22 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
             <span className="text-on-tertiary-container font-bold">100% Credited Toward Future Services</span>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto pt-2">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto pt-2">
             <button
               onClick={handleBookNow}
               className="w-full sm:w-auto min-h-[48px] sm:min-h-[54px] px-6 sm:px-9 py-3 sm:py-3.5 bg-secondary text-on-secondary rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-xl shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98"
             >
               <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-white/90 shrink-0" />
-              <span className="whitespace-nowrap">Book Consultation — ₦50,000</span>
+              <span className="whitespace-nowrap">Book Your ₦50,000 Consultation</span>
               <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 text-white/90 shrink-0" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsQualificationOpen(true)}
+              className="w-full sm:w-auto min-h-[48px] sm:min-h-[54px] px-5 sm:px-7 py-3 sm:py-3.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 border border-surface-container hover:border-secondary/40 transition-all active:scale-98"
+            >
+              <HelpCircle className="w-4 h-4 text-secondary shrink-0" />
+              <span className="whitespace-nowrap">Have Questions? Check If We're a Fit</span>
             </button>
           </div>
 
@@ -786,19 +812,35 @@ export const TradeIntelligenceView: React.FC<TradeIntelligenceViewProps> = ({
       </section>
 
       {/* 10. STICKY MOBILE BOTTOM CTA BAR */}
-      <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface-container-lowest/95 backdrop-blur-md border-t border-surface-container p-3 px-4 flex items-center justify-between shadow-xl">
-        <div className="flex flex-col">
-          <span className="text-base font-bold text-on-surface leading-tight">₦50,000</span>
-          <span className="text-[11px] text-secondary font-semibold">100% Credited to Retainers</span>
+      <div className="md:hidden fixed bottom-16 inset-x-0 z-40 bg-surface-container-lowest/95 backdrop-blur-md border-t border-surface-container p-2.5 px-4 flex items-center justify-between shadow-xl gap-2">
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-base font-bold text-on-surface leading-tight">₦50,000</span>
+            <span className="text-[10px] text-on-tertiary-container font-semibold">100% Credited</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsQualificationOpen(true)}
+            className="text-[11px] text-secondary hover:underline font-semibold text-left truncate flex items-center gap-1 pt-0.5"
+          >
+            <span>Have Questions? Check Fit</span>
+          </button>
         </div>
         <button
           onClick={handleBookNow}
-          className="min-h-[42px] px-4 py-2 bg-secondary text-on-secondary rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md active:scale-98"
+          className="min-h-[42px] px-3.5 py-2 bg-secondary text-on-secondary rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md active:scale-98 shrink-0"
         >
-          <span className="whitespace-nowrap">Book Consultation</span>
+          <span className="whitespace-nowrap">Book ₦50k</span>
           <ArrowRight className="w-3.5 h-3.5 shrink-0" />
         </button>
       </div>
+
+      {/* Pre-Payment WhatsApp Qualification Modal */}
+      <WhatsAppQualificationModal
+        isOpen={isQualificationOpen}
+        onClose={() => setIsQualificationOpen(false)}
+        onBookNow={handleBookNow}
+      />
     </div>
   );
 };

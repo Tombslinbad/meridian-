@@ -14,7 +14,7 @@ export const Footer: React.FC = () => {
               <img
                 alt="Meridian China Advisory Logo"
                 className="h-8 w-auto object-contain"
-                src="https://lh3.googleusercontent.com/aida/AEtjO1WF3MF9hGrmEfgvZFxPK0eucnkOb3rH7KGfH58tKaaaRvsfTCPfNLKUCv89x3LOKNBvYF8zd0m4X5zR-cw26PTzHqPJTU3MMVOBkrnXJns2XKsTDtwyIv1EMj9H8P4oL3ENFAVrDjEboSPhiRprCFJ_LMgR4lDZE52bQZn73Dqyz-eA6zQ2VUEkvCtw5dHJ7zTScvtIrJSLGjx2248bUeJ3Ztkq_2W7_ld1k-FQE5ydTsz8xtmXiewamw"
+                src="/meridian-logo.svg"
               />
               <span className="text-base font-bold text-on-surface">
                 Meridian China Advisory

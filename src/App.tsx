@@ -11,29 +11,70 @@ import { ConfirmationView } from './views/ConfirmationView';
 import { CantonFairView } from './views/CantonFairView';
 import { VerificationView } from './views/VerificationView';
 import { PaymentCelebrationModal } from './components/PaymentCelebrationModal';
-import { initAnalytics, trackPageView, trackViewContent, trackPurchase } from './lib/analytics';
+import {
+  initAnalytics,
+  trackPageView,
+  trackViewContent,
+  trackCompletePayment,
+  trackInitiateCheckout
+} from './lib/analytics';
+
+const DRAFT_STORAGE_KEY = 'mca_consultation_draft_v1';
+
+const getInitialBookingDate = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) {
+    d.setDate(d.getDate() + 1);
+  }
+  const iso = d.toISOString().split('T')[0];
+  const formatted = d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  return { iso, formatted };
+};
+
+const getSavedDraft = (): Partial<BookingDetails> => {
+  try {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem(DRAFT_STORAGE_KEY);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read draft from sessionStorage:', err);
+  }
+  return {};
+};
 
 export function App() {
+  const initialDate = getInitialBookingDate();
+  const savedDraft = getSavedDraft();
+
   const [currentTab, setCurrentTab] = useState<AppTab>('advisory');
   const [user, setUser] = useState<User | null>(null);
   const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState(false);
 
-  // Initial Booking State with shadow names/placeholders, requiring explicit user input
+  // Initial Booking State with sessionStorage persistence and ₦50,000 exact fee
   const [booking, setBooking] = useState<BookingDetails>({
-    fullName: '',
-    email: '',
-    phone: '',
-    companyName: '',
-    industry: 'Auto Parts & Heavy Machinery (Guangzhou / Yiwu)',
-    tripObjective: 'canton',
-    travelWindow: 'October - November 2026 (140th Canton Fair, Guangzhou)',
-    selectedDate: 'Monday, Oct 12, 2026',
-    selectedDateIso: '2026-10-12',
-    selectedTime: '11:30 AM',
+    fullName: savedDraft.fullName || '',
+    email: savedDraft.email || '',
+    phone: savedDraft.phone || '',
+    companyName: savedDraft.companyName || '',
+    industry: savedDraft.industry || 'Auto Parts & Heavy Machinery (Guangzhou / Yiwu)',
+    tripObjective: savedDraft.tripObjective || 'canton',
+    travelWindow: savedDraft.travelWindow || 'October - November 2026 (140th Canton Fair, Guangzhou)',
+    selectedDate: savedDraft.selectedDate || initialDate.formatted,
+    selectedDateIso: savedDraft.selectedDateIso || initialDate.iso,
+    selectedTime: savedDraft.selectedTime || '11:30 AM',
     paymentChannel: 'card',
     auditReference: `MCA-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
     meetUrl: getDefaultMeetUrl(),
-    amountNgn: 50750,
+    amountNgn: 50000,
   });
 
   // Initialize analytics and track page views
@@ -45,13 +86,15 @@ export function App() {
   useEffect(() => {
     trackPageView(currentTab);
     if (currentTab === 'advisory') {
-      trackViewContent();
+      trackViewContent('China Business Consultation');
+    } else if (currentTab === 'booking') {
+      trackInitiateCheckout(50000);
     }
   }, [currentTab]);
 
   useEffect(() => {
     if (booking.paymentStatus === 'succeeded' && booking.bachsCheckoutId) {
-      trackPurchase(booking.bachsCheckoutId, 50000, 'NGN');
+      trackCompletePayment(booking.bachsCheckoutId, 50000, 'NGN');
     }
   }, [booking.paymentStatus, booking.bachsCheckoutId]);
 
@@ -63,25 +106,37 @@ export function App() {
     submitted: false,
   });
 
-  // Check for Bachs payment redirect parameters on load
+  // Check for Bachs payment redirect parameters on load - strictly verified with backend Bachs API
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      const paymentStatus = urlParams.get('payment_status');
       const ref = urlParams.get('ref');
-      const sessionId = urlParams.get('session_id');
+      const sessionId = urlParams.get('session_id') || urlParams.get('checkout_id');
 
-      if (paymentStatus === 'success') {
-        if (ref || sessionId) {
-          setBooking((prev) => ({
-            ...prev,
-            auditReference: ref || prev.auditReference,
-            bachsCheckoutId: sessionId || prev.bachsCheckoutId,
-            paymentStatus: 'succeeded',
-          }));
-        }
-        setShowPaymentSuccessModal(true);
-        setCurrentTab('confirmed');
+      if (sessionId) {
+        // Backend verification against Bachs API
+        fetch(`/api/payments/bachs/verify-checkout/${encodeURIComponent(sessionId)}`)
+          .then((res) => {
+            const ct = res.headers.get('content-type') || '';
+            if (ct.includes('application/json')) return res.json();
+            return null;
+          })
+          .then((data) => {
+            if (data && data.isSucceeded) {
+              setBooking((prev) => ({
+                ...prev,
+                auditReference: data.reference || ref || prev.auditReference,
+                bachsCheckoutId: sessionId,
+                paymentStatus: 'succeeded',
+              }));
+              trackCompletePayment(sessionId, 50000, 'NGN');
+              setShowPaymentSuccessModal(true);
+              setCurrentTab('confirmed');
+            }
+          })
+          .catch((e) => {
+            console.warn('Backend payment verification error on redirect:', e);
+          });
       }
     } catch (e) {
       console.warn('URL param parse error:', e);
@@ -103,7 +158,41 @@ export function App() {
   }, []);
 
   const handleUpdateBooking = (updates: Partial<BookingDetails>) => {
-    setBooking((prev) => ({ ...prev, ...updates }));
+    setBooking((prev) => {
+      const next = { ...prev, ...updates };
+      try {
+        if (typeof window !== 'undefined') {
+          const draft: Partial<BookingDetails> = {
+            fullName: next.fullName,
+            email: next.email,
+            phone: next.phone,
+            companyName: next.companyName,
+            industry: next.industry,
+            tripObjective: next.tripObjective,
+            travelWindow: next.travelWindow,
+            selectedDate: next.selectedDate,
+            selectedDateIso: next.selectedDateIso,
+            selectedTime: next.selectedTime,
+          };
+          sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+        }
+      } catch (err) {
+        console.warn('Could not save draft to sessionStorage:', err);
+      }
+      return next;
+    });
+  };
+
+  const handleBookingSuccess = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+      }
+    } catch (err) {
+      console.warn('Could not clear draft from sessionStorage:', err);
+    }
+    setShowPaymentSuccessModal(true);
+    handleNavigate('confirmed');
   };
 
   const handleUpdateDiagnostic = (updates: Partial<DiagnosticData>) => {
@@ -155,10 +244,7 @@ export function App() {
             booking={booking}
             onUpdateBooking={handleUpdateBooking}
             onNavigate={handleNavigate}
-            onBookingSuccess={() => {
-              setShowPaymentSuccessModal(true);
-              handleNavigate('confirmed');
-            }}
+            onBookingSuccess={handleBookingSuccess}
             user={user}
           />
         )}

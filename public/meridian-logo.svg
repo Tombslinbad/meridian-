@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 80" width="280" height="80" fill="none">
+  <defs>
+    <linearGradient id="mcaGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F59E0B" />
+      <stop offset="50%" stop-color="#D97706" />
+      <stop offset="100%" stop-color="#B45309" />
+    </linearGradient>
+    <linearGradient id="mcaEmerald" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+    <linearGradient id="mcaShield" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1E293B" />
+    </linearGradient>
+  </defs>
+
+  <!-- Emblem Icon Container -->
+  <g transform="translate(8, 8)">
+    <!-- Outer Shield / Hexagonal Seal -->
+    <rect x="0" y="0" width="64" height="64" rx="18" fill="url(#mcaShield)" stroke="url(#mcaGold)" stroke-width="1.5" />
+    
+    <!-- Meridian Globe Grid -->
+    <circle cx="32" cy="32" r="22" stroke="#334155" stroke-width="1" stroke-dasharray="2 2" fill="none" />
+    <ellipse cx="32" cy="32" rx="11" ry="22" stroke="url(#mcaEmerald)" stroke-width="1.25" fill="none" opacity="0.85" />
+    <line x1="10" y1="32" x2="54" y2="32" stroke="#475569" stroke-width="1" />
+    
+    <!-- Central Meridian Compass Star -->
+    <path d="M32 16 L35 29 L48 32 L35 35 L32 48 L29 35 L16 32 L29 29 Z" fill="url(#mcaGold)" />
+    <circle cx="32" cy="32" r="2.5" fill="#FFFFFF" />
+  </g>
+
+  <!-- Brand Typography -->
+  <text x="84" y="36" font-family="'Plus Jakarta Sans', -apple-system, sans-serif" font-size="24" font-weight="800" fill="#0F172A" letter-spacing="-0.5">
+    MERIDIAN
+  </text>
+  
+  <text x="84" y="54" font-family="'Plus Jakarta Sans', -apple-system, sans-serif" font-size="10.5" font-weight="700" fill="#047857" letter-spacing="1.5">
+    CHINA ADVISORY DESK
+  </text>
+</svg>

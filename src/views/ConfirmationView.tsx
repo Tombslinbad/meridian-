@@ -95,6 +95,7 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [downloadFeedback, setDownloadFeedback] = useState<string | null>(null);
 
   // Diagnostic form fields
   const [hsCodes, setHsCodes] = useState(diagnostic.hsCodesOrUrls || '');
@@ -794,10 +795,18 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface-container">
+              {downloadFeedback && (
+                <span className="text-xs text-secondary font-semibold animate-fade-in mr-auto">
+                  {downloadFeedback}
+                </span>
+              )}
               <button
                 onClick={() => {
-                  alert('140th Canton Fair Strategy Blueprint downloaded successfully.');
-                  setShowGuideModal(false);
+                  setDownloadFeedback('140th Canton Fair Strategy Blueprint downloaded.');
+                  setTimeout(() => {
+                    setDownloadFeedback(null);
+                    setShowGuideModal(false);
+                  }, 1200);
                 }}
                 className="px-5 py-2.5 rounded-xl bg-secondary text-white text-xs font-bold flex items-center gap-1.5"
               >
@@ -864,10 +873,19 @@ export const ConfirmationView: React.FC<ConfirmationViewProps> = ({
               </div>
             </div>
 
+            {downloadFeedback && (
+              <span className="text-xs text-secondary font-semibold text-center animate-fade-in">
+                {downloadFeedback}
+              </span>
+            )}
+
             <button
               onClick={() => {
-                alert('Official receipt downloaded.');
-                setShowReceiptModal(false);
+                setDownloadFeedback('Official receipt generated.');
+                setTimeout(() => {
+                  setDownloadFeedback(null);
+                  setShowReceiptModal(false);
+                }, 1200);
               }}
               className="w-full min-h-[46px] px-4 py-2.5 bg-secondary text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2"
             >

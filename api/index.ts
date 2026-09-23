@@ -1,5 +1,25 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
+import { sendTikTokCompletePayment } from '../server/tiktokEvents';
+
+// ============================================================================
+// TIKTOK ATTRIBUTION CACHE FOR SERVER-SIDE EVENTS API
+// ============================================================================
+interface CheckoutAttribution {
+  checkoutId: string;
+  reference: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  ttclid?: string;
+  ttp?: string;
+  ip?: string;
+  userAgent?: string;
+  pageUrl?: string;
+  amount?: number;
+  currency?: string;
+}
+
+const checkoutAttributions = new Map<string, CheckoutAttribution>();
 
 // ============================================================================
 // CONSTANTS & ENVIRONMENT ACCESS
@@ -8,11 +28,8 @@ export const ADVISOR_EMAIL = 'igwev2956@gmail.com';
 export const CLIENT_SENDER_EMAIL = 'meridianadvisory@verifieduni.com';
 export const ADVISOR_NOTIFICATION_SENDER_EMAIL = 'notifications@verifieduni.com';
 
-const DEFAULT_BACHS_SANDBOX_KEY =
-  'sk_sandbox_757c6cfc_lJCFv9m9v8fS_dgS77H_qCFgHsuRVoCH5kFKn8dAc3E';
-
 const getBachsApiKey = (): string => {
-  return process.env.BACHS_API_KEY?.trim() || DEFAULT_BACHS_SANDBOX_KEY;
+  return process.env.BACHS_API_KEY?.trim() || '';
 };
 
 const getBachsBaseUrl = (apiKey: string): string => {
@@ -599,6 +616,31 @@ router.post('/payments/bachs/create-checkout', async (req: Request, res: Respons
       });
     }
 
+    // Cache attribution information for server-side TikTok Events API reporting
+    if (data.checkout_id) {
+      checkoutAttributions.set(data.checkout_id, {
+        checkoutId: data.checkout_id,
+        reference: data.reference || reference,
+        customerEmail: String(customerEmail).trim().toLowerCase(),
+        customerPhone: phoneNumber ? String(phoneNumber).trim() : undefined,
+        ttclid:
+          req.body?.tiktokAttribution?.ttclid ||
+          (req.query?.ttclid as string) ||
+          (req.headers['x-ttclid'] as string),
+        ttp:
+          req.body?.tiktokAttribution?.ttp ||
+          (req.query?.ttp as string) ||
+          (req.headers['x-ttp'] as string),
+        ip:
+          (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ||
+          req.socket.remoteAddress,
+        userAgent: req.headers['user-agent'],
+        pageUrl: req.body?.tiktokAttribution?.pageUrl,
+        amount: Number(amount) || 50000,
+        currency: String(currency || 'NGN').toUpperCase(),
+      });
+    }
+
     return res.status(201).json({
       success: true,
       checkoutId: data.checkout_id,
@@ -653,6 +695,34 @@ router.get('/payments/bachs/verify-checkout/:checkoutId', async (req: Request, r
       data.charge?.status === 'successful' ||
       data.charge?.status === 'completed';
 
+    // Dispatch server-side TikTok CompletePayment ONLY when genuinely verified by Bachs
+    if (isSucceeded) {
+      const attr = checkoutAttributions.get(checkoutId);
+      sendTikTokCompletePayment({
+        checkoutId,
+        reference: data.reference || attr?.reference,
+        amount: data.amount ? Number(data.amount) : 50000,
+        currency: data.currency || 'NGN',
+        customerEmail: data.customer?.email || attr?.customerEmail,
+        customerPhone: data.customer?.phone_number || attr?.customerPhone,
+        ttclid:
+          attr?.ttclid ||
+          (req.headers['x-ttclid'] as string) ||
+          (req.query?.ttclid as string),
+        ttp:
+          attr?.ttp ||
+          (req.headers['x-ttp'] as string) ||
+          (req.query?.ttp as string),
+        ip:
+          (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ||
+          req.socket.remoteAddress,
+        userAgent: req.headers['user-agent'],
+        pageUrl: attr?.pageUrl,
+      }).catch((e) => {
+        console.warn('[TikTok Events API] Non-fatal dispatch error:', e?.message || e);
+      });
+    }
+
     return res.json({
       checkoutId: data.checkout_id,
       status: data.status,
@@ -673,6 +743,129 @@ router.get('/payments/bachs/verify-checkout/:checkoutId', async (req: Request, r
       error: err?.message || 'Failed to verify checkout session with Bachs gateway.',
     });
   }
+});
+
+// Idempotency cache to prevent duplicate processing or duplicate emails
+const processedBachsEvents = new Set<string>();
+
+// Bachs Webhook Endpoint
+router.post('/payments/bachs/webhook', async (req: Request, res: Response) => {
+  try {
+    const apiKey = getBachsApiKey();
+    if (!apiKey) {
+      return res.status(503).json({ error: 'Bachs API key not configured' });
+    }
+
+    const payload = req.body || {};
+    const checkoutId =
+      payload?.data?.checkout_id ||
+      payload?.checkout_id ||
+      payload?.data?.id ||
+      payload?.id;
+
+    if (!checkoutId) {
+      return res.status(400).json({ error: 'Missing checkoutId in webhook payload' });
+    }
+
+    // Idempotency check
+    const eventKey = `${checkoutId}_${payload.event || 'completed'}`;
+    if (processedBachsEvents.has(eventKey)) {
+      return res.json({ received: true, status: 'already_processed' });
+    }
+
+    // Authenticate and verify with Bachs source-of-truth API directly
+    const baseUrl = getBachsBaseUrl(apiKey);
+    const bachsRes = await fetch(`${baseUrl}/checkout-sessions/${encodeURIComponent(checkoutId)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!bachsRes.ok) {
+      console.warn(`[Webhook] Could not verify checkout ${checkoutId} with Bachs API`);
+      return res.status(400).json({ error: 'Verification failed with Bachs API' });
+    }
+
+    const sessionData = (await bachsRes.json()) as any;
+    const isSucceeded =
+      sessionData.payment_status === 'succeeded' ||
+      sessionData.status === 'complete' ||
+      sessionData.charge?.status === 'successful' ||
+      sessionData.charge?.status === 'completed';
+
+    if (isSucceeded) {
+      processedBachsEvents.add(eventKey);
+      console.log(`[Webhook] Verified successful payment for checkout ${checkoutId}`);
+
+      // Dispatch server-side TikTok CompletePayment asynchronously & idempotently
+      const attr = checkoutAttributions.get(checkoutId);
+      sendTikTokCompletePayment({
+        checkoutId,
+        reference:
+          sessionData.reference ||
+          sessionData.metadata?.booking_reference ||
+          attr?.reference,
+        amount: sessionData.amount ? Number(sessionData.amount) : 50000,
+        currency: sessionData.currency || 'NGN',
+        customerEmail: sessionData.customer?.email || attr?.customerEmail,
+        customerPhone: sessionData.customer?.phone_number || attr?.customerPhone,
+        ttclid: attr?.ttclid,
+        ttp: attr?.ttp,
+        ip:
+          (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ||
+          req.socket.remoteAddress,
+        userAgent: req.headers['user-agent'],
+        pageUrl: attr?.pageUrl,
+      }).catch((e) => {
+        console.warn('[TikTok Events API] Non-fatal dispatch error from webhook:', e?.message || e);
+      });
+
+      // If session metadata contains booking data, dispatch notifications if not yet sent
+      if (sessionData.metadata && sessionData.metadata.booking_reference) {
+        const meta = sessionData.metadata;
+        const bookingPayload: BookingPayload = {
+          auditReference: meta.booking_reference,
+          fullName: sessionData.customer?.name || meta.customer_name || 'Valued Client',
+          email: sessionData.customer?.email || meta.customer_email || '',
+          phone: sessionData.customer?.phone_number || meta.phone_number || '',
+          companyName: meta.company_name || 'Trading Entity',
+          industry: meta.industry || 'General Trade',
+          tripObjective: meta.trip_objective || 'Strategy Advisory',
+          travelWindow: meta.travel_window || 'Flexible',
+          selectedDate: meta.selected_date || 'Confirmed Slot',
+          selectedDateIso: meta.selected_date_iso || new Date().toISOString().split('T')[0],
+          selectedTime: meta.selected_time || 'Agreed Slot',
+          amountNgn: sessionData.amount || 50000,
+          meetUrl: meta.meet_url || 'https://meet.google.com',
+        };
+
+        if (bookingPayload.email) {
+          await dispatchAutomaticEmails(bookingPayload);
+        }
+      }
+    }
+
+    return res.json({ received: true, verified: isSucceeded });
+  } catch (err: any) {
+    console.error('[Webhook Error]:', err);
+    return res.status(500).json({ error: 'Webhook processing error' });
+  }
+});
+
+// TikTok Tracking Status & Diagnostic endpoint (read-only, zero secrets exposed)
+router.get('/analytics/tiktok/status', (_req: Request, res: Response) => {
+  const isConfigured = Boolean(process.env.TIKTOK_EVENTS_API_ACCESS_TOKEN?.trim());
+  return res.json({
+    status: 'ok',
+    eventsApiConfigured: isConfigured,
+    pixelId:
+      process.env.TIKTOK_PIXEL_ID ||
+      process.env.VITE_TIKTOK_PIXEL_ID ||
+      'DAPHHSRC77U28JP3A930',
+    mode: process.env.NODE_ENV || 'development',
+  });
 });
 
 // Automated Notification Route

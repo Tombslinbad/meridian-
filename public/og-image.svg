@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" fill="none">
+  <defs>
+    <linearGradient id="ogBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090E17" />
+      <stop offset="50%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1E293B" />
+    </linearGradient>
+    <linearGradient id="ogGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBBF24" />
+      <stop offset="50%" stop-color="#D97706" />
+      <stop offset="100%" stop-color="#B45309" />
+    </linearGradient>
+    <linearGradient id="ogEmerald" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#ogBg)" />
+
+  <!-- Subtle grid lines -->
+  <g stroke="#1E293B" stroke-width="1" opacity="0.6">
+    <line x1="0" y1="105" x2="1200" y2="105" />
+    <line x1="0" y1="210" x2="1200" y2="210" />
+    <line x1="0" y1="315" x2="1200" y2="315" />
+    <line x1="0" y1="420" x2="1200" y2="420" />
+    <line x1="0" y1="525" x2="1200" y2="525" />
+  </g>
+
+  <!-- Top Accent Bar -->
+  <rect x="0" y="0" width="1200" height="8" fill="url(#ogEmerald)" />
+
+  <!-- Main Content Group -->
+  <g transform="translate(100, 110)">
+    <!-- Badge -->
+    <rect x="0" y="0" width="410" height="42" rx="21" fill="#047857" fill-opacity="0.2" stroke="#10B981" stroke-width="1.5" />
+    <circle cx="24" cy="21" r="5" fill="#10B981" />
+    <text x="40" y="27" font-family="'Plus Jakarta Sans', sans-serif" font-size="14" font-weight="700" fill="#34D399" letter-spacing="1">
+      BILATERAL TRADE STRATEGY DESK
+    </text>
+
+    <!-- Title -->
+    <text x="0" y="115" font-family="'Plus Jakarta Sans', sans-serif" font-size="52" font-weight="800" fill="#F8FAFC" letter-spacing="-1">
+      Meridian China Advisory
+    </text>
+
+    <!-- Subtitle -->
+    <text x="0" y="175" font-family="'Plus Jakarta Sans', sans-serif" font-size="28" font-weight="600" fill="#94A3B8">
+      1-on-1 China Business &amp; Canton Fair Consultation
+    </text>
+
+    <!-- Bullets -->
+    <g transform="translate(0, 220)">
+      <!-- Item 1 -->
+      <circle cx="12" cy="18" r="8" fill="#D97706" />
+      <text x="32" y="23" font-family="'Plus Jakarta Sans', sans-serif" font-size="20" font-weight="600" fill="#E2E8F0">
+        140th Canton Fair Phase Planning &amp; Commodity Matching
+      </text>
+
+      <!-- Item 2 -->
+      <circle cx="12" cy="62" r="8" fill="#10B981" />
+      <text x="32" y="67" font-family="'Plus Jakarta Sans', sans-serif" font-size="20" font-weight="600" fill="#E2E8F0">
+        Direct Chinese Factory Due Diligence &amp; License Auditing
+      </text>
+
+      <!-- Item 3 -->
+      <circle cx="12" cy="106" r="8" fill="#0EA5E9" />
+      <text x="32" y="111" font-family="'Plus Jakarta Sans', sans-serif" font-size="20" font-weight="600" fill="#E2E8F0">
+        M-Visa Documentation Review &amp; Travel Budget Modeling
+      </text>
+    </g>
+
+    <!-- Bottom Pill -->
+    <g transform="translate(0, 380)">
+      <rect x="0" y="0" width="360" height="52" rx="16" fill="#047857" />
+      <text x="24" y="33" font-family="'Plus Jakarta Sans', sans-serif" font-size="18" font-weight="800" fill="#FFFFFF">
+        ₦50,000 Total &bull; 60-Min Private Session
+      </text>
+    </g>
+  </g>
+
+  <!-- Right Decorative Emblem -->
+  <g transform="translate(850, 160)">
+    <circle cx="130" cy="150" r="130" fill="#0F172A" stroke="url(#ogGold)" stroke-width="3" />
+    <circle cx="130" cy="150" r="95" stroke="#334155" stroke-width="2" stroke-dasharray="6 6" fill="none" />
+    <ellipse cx="130" cy="150" rx="45" ry="95" stroke="url(#ogEmerald)" stroke-width="2.5" fill="none" />
+    <line x1="35" y1="150" x2="225" y2="150" stroke="#475569" stroke-width="2" />
+    <path d="M130 80 L142 136 L195 150 L142 164 L130 220 L118 164 L65 150 L118 136 Z" fill="url(#ogGold)" />
+    <circle cx="130" cy="150" r="8" fill="#FFFFFF" />
+  </g>
+</svg>

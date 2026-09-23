@@ -23,7 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
           <img
             alt="Meridian China Advisory Logo"
             className="h-8 sm:h-9 md:h-10 w-auto object-contain transition-transform group-hover:scale-105 shrink-0"
-            src="https://lh3.googleusercontent.com/aida/AEtjO1WF3MF9hGrmEfgvZFxPK0eucnkOb3rH7KGfH58tKaaaRvsfTCPfNLKUCv89x3LOKNBvYF8zd0m4X5zR-cw26PTzHqPJTU3MMVOBkrnXJns2XKsTDtwyIv1EMj9H8P4oL3ENFAVrDjEboSPhiRprCFJ_LMgR4lDZE52bQZn73Dqyz-eA6zQ2VUEkvCtw5dHJ7zTScvtIrJSLGjx2248bUeJ3Ztkq_2W7_ld1k-FQE5ydTsz8xtmXiewamw"
+            src="/meridian-logo.svg"
           />
           <div className="hidden md:flex flex-col">
             <span className="font-title-md text-base sm:text-lg text-on-surface tracking-tight leading-none font-bold">

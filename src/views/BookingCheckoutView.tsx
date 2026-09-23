@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppTab, BookingDetails } from '../types';
 import { User } from 'firebase/auth';
+import { getTikTokClickId, getTikTokCookie } from '../lib/analytics';
 import {
   fetchDayAvailability,
   fetchMonthOverview,
@@ -44,8 +45,19 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
   onNavigate,
   onBookingSuccess,
 }) => {
-  const [currentMonth, setCurrentMonth] = useState<'September 2026' | 'October 2026' | 'November 2026'>('October 2026');
-  const [selectedDayNumber, setSelectedDayNumber] = useState<number>(12);
+  const initialDateObj = booking.selectedDateIso
+    ? new Date(booking.selectedDateIso)
+    : new Date();
+
+  const [currentYear, setCurrentYear] = useState<number>(
+    isNaN(initialDateObj.getTime()) ? 2026 : initialDateObj.getFullYear()
+  );
+  const [currentMonthIndex, setCurrentMonthIndex] = useState<number>(
+    isNaN(initialDateObj.getTime()) ? 9 : initialDateObj.getMonth()
+  );
+  const [selectedDayNumber, setSelectedDayNumber] = useState<number>(
+    isNaN(initialDateObj.getTime()) ? 12 : initialDateObj.getDate()
+  );
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>(booking.selectedTime || '11:30 AM');
   const [agreedToTerms, setAgreedToTerms] = useState<boolean>(true);
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
@@ -166,7 +178,14 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
     async (checkoutId: string, isManual = false) => {
       if (isManual) setIsVerifyingManual(true);
       try {
-        const res = await fetch(`/api/payments/bachs/verify-checkout/${checkoutId}`);
+        const ttclid = getTikTokClickId();
+        const ttp = getTikTokCookie();
+        const queryParams = new URLSearchParams();
+        if (ttclid) queryParams.set('ttclid', ttclid);
+        if (ttp) queryParams.set('ttp', ttp);
+        const qs = queryParams.toString() ? `?${queryParams.toString()}` : '';
+
+        const res = await fetch(`/api/payments/bachs/verify-checkout/${checkoutId}${qs}`);
         const ct = res.headers.get('content-type') || '';
         if (!ct.includes('application/json')) {
           return false;
@@ -218,8 +237,34 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
     [checkBachsVerification]
   );
 
-  // Active dates in October 2026
-  const activeOctoberDays = [1, 2, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 26, 27, 28, 29, 30];
+  const handlePrevMonth = () => {
+    const today = new Date();
+    const isCurrentOrPastMonth =
+      currentYear < today.getFullYear() ||
+      (currentYear === today.getFullYear() && currentMonthIndex <= today.getMonth());
+    if (isCurrentOrPastMonth) return;
+
+    if (currentMonthIndex === 0) {
+      setCurrentMonthIndex(11);
+      setCurrentYear((y) => y - 1);
+    } else {
+      setCurrentMonthIndex((m) => m - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (currentMonthIndex === 11) {
+      setCurrentMonthIndex(0);
+      setCurrentYear((y) => y + 1);
+    } else {
+      setCurrentMonthIndex((m) => m + 1);
+    }
+  };
+
+  const currentMonthLabel = new Date(currentYear, currentMonthIndex, 1).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  });
 
   const loadAvailabilityForDate = useCallback(
     async (dateIso: string, refresh = false) => {
@@ -251,31 +296,39 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
     [selectedTimeSlot, onUpdateBooking]
   );
 
-  const loadMonthOverview = useCallback(async () => {
+  const loadMonthOverview = useCallback(async (year: number, month: number) => {
     try {
-      const data = await fetchMonthOverview(2026, 10);
+      const data = await fetchMonthOverview(year, month);
       setMonthOverview(data.overview || {});
     } catch (err) {
       console.error('Failed to load month overview:', err);
     }
   }, []);
 
+  useEffect(() => {
+    loadMonthOverview(currentYear, currentMonthIndex + 1);
+  }, [currentYear, currentMonthIndex, loadMonthOverview]);
+
   // Initial load
   useEffect(() => {
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    const initialIso = booking.selectedDateIso || `2026-10-${pad(selectedDayNumber)}`;
+    const initialIso =
+      booking.selectedDateIso ||
+      `${currentYear}-${pad(currentMonthIndex + 1)}-${pad(selectedDayNumber)}`;
     loadAvailabilityForDate(initialIso);
-    loadMonthOverview();
   }, []);
 
   const handleDateSelect = (dayNum: number) => {
     setSelectedDayNumber(dayNum);
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const d = new Date(2026, 9, dayNum); // Month 9 is October (0-indexed)
-    const dayName = dayNames[d.getDay()];
-    const dateFormatted = `${dayName}, Oct ${dayNum}, 2026`;
+    const d = new Date(currentYear, currentMonthIndex, dayNum);
+    const dateFormatted = d.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    const iso = `2026-10-${pad(dayNum)}`;
+    const iso = `${currentYear}-${pad(currentMonthIndex + 1)}-${pad(dayNum)}`;
 
     onUpdateBooking({
       selectedDate: dateFormatted,
@@ -350,6 +403,11 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
           selectedTime: booking.selectedTime || selectedTimeSlot,
           amount: booking.amountNgn || 50000,
           currency: 'NGN',
+          tiktokAttribution: {
+            ttclid: getTikTokClickId(),
+            ttp: getTikTokCookie(),
+            pageUrl: window.location.href,
+          },
         }),
       });
 
@@ -486,49 +544,47 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                 </div>
               </div>
 
-              {/* Real-time personal calendar synchronization banner */}
+              {/* Confirmed-slot conflict prevention banner */}
               <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2 text-xs">
-                  <span
-                    className={`w-2 h-2 rounded-full shrink-0 ${
-                      calendarSynced ? 'bg-emerald-500 animate-pulse' : 'bg-secondary'
-                    }`}
-                  />
+                  <span className="w-2 h-2 rounded-full shrink-0 bg-secondary" />
                   <span className="text-on-surface-variant">
-                    {calendarSynced
-                      ? 'Live synced with Advisor Personal Google Calendar — Automatic collision prevention active'
-                      : 'Advisor Schedule Ledger Active — 1-on-1 double-booking prevention enabled'}
+                    Availability is managed through our booking calendar to prevent confirmed-slot conflicts.
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
                     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-                    const iso = booking.selectedDateIso || `2026-10-${pad(selectedDayNumber)}`;
+                    const iso =
+                      booking.selectedDateIso ||
+                      `${currentYear}-${pad(currentMonthIndex + 1)}-${pad(selectedDayNumber)}`;
                     loadAvailabilityForDate(iso, true);
                   }}
                   disabled={isLoadingAvailability}
                   className="text-[11px] text-secondary hover:underline flex items-center gap-1 font-bold shrink-0 self-end sm:self-auto"
                 >
                   <RefreshCw className={`w-3 h-3 ${isLoadingAvailability ? 'animate-spin' : ''}`} />
-                  <span>{isLoadingAvailability ? 'Checking...' : 'Refresh Live Schedule'}</span>
+                  <span>{isLoadingAvailability ? 'Checking...' : 'Refresh Schedule'}</span>
                 </button>
               </div>
 
               {/* Month Header */}
               <div className="flex items-center justify-between px-2">
-                <span className="text-base font-bold text-on-surface">{currentMonth}</span>
+                <span className="text-base font-bold text-on-surface">{currentMonthLabel}</span>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setCurrentMonth(currentMonth === 'November 2026' ? 'October 2026' : 'September 2026')}
+                    onClick={handlePrevMonth}
+                    aria-label="Previous month"
                     className="w-8 h-8 rounded-lg bg-surface-container-low hover:bg-surface-container flex items-center justify-center text-on-surface transition-colors"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCurrentMonth(currentMonth === 'September 2026' ? 'October 2026' : 'November 2026')}
+                    onClick={handleNextMonth}
+                    aria-label="Next month"
                     className="w-8 h-8 rounded-lg bg-surface-container-low hover:bg-surface-container flex items-center justify-center text-on-surface transition-colors"
                   >
                     <ChevronRight className="w-4 h-4" />
@@ -549,60 +605,86 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
 
               {/* Calendar Grid */}
               <div className="grid grid-cols-7 gap-2">
-                <span className="h-10 flex items-center justify-center text-xs text-outline/40">28</span>
-                <span className="h-10 flex items-center justify-center text-xs text-outline/40">29</span>
-                <span className="h-10 flex items-center justify-center text-xs text-outline/40">30</span>
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((dayNum) => {
-                  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-                  const iso = `2026-10-${pad(dayNum)}`;
-                  const isSelectable = activeOctoberDays.includes(dayNum);
-                  const isSelected = selectedDayNumber === dayNum;
-                  const dayOverview = monthOverview[iso];
-                  const isFullyBooked = isSelectable && dayOverview && dayOverview.isFullyBooked;
-
-                  if (!isSelectable) {
-                    return (
-                      <span
-                        key={dayNum}
-                        className="h-10 flex items-center justify-center text-xs text-outline/40 font-medium"
-                      >
-                        {dayNum}
-                      </span>
-                    );
-                  }
+                {(() => {
+                  const daysInMonth = new Date(currentYear, currentMonthIndex + 1, 0).getDate();
+                  const firstDayOfWeek = new Date(currentYear, currentMonthIndex, 1).getDay();
+                  const leadingOffset = (firstDayOfWeek + 6) % 7;
+                  const prevMonthDaysCount = new Date(currentYear, currentMonthIndex, 0).getDate();
+                  const leadingDays = Array.from(
+                    { length: leadingOffset },
+                    (_, i) => prevMonthDaysCount - leadingOffset + 1 + i
+                  );
 
                   return (
-                    <button
-                      key={dayNum}
-                      type="button"
-                      disabled={Boolean(isFullyBooked)}
-                      onClick={() => handleDateSelect(dayNum)}
-                      title={
-                        isFullyBooked
-                          ? 'Fully booked on personal calendar and advisory ledger'
-                          : `${dayOverview ? dayOverview.availableSlots : 'Open'} slots available`
-                      }
-                      className={`h-10 rounded-xl flex flex-col items-center justify-center text-sm font-semibold transition-all relative ${
-                        isFullyBooked
-                          ? 'bg-surface-container text-outline/50 cursor-not-allowed line-through'
-                          : isSelected
-                          ? 'bg-secondary text-white font-bold shadow-md shadow-secondary/20'
-                          : 'text-on-surface hover:bg-surface-container'
-                      }`}
-                    >
-                      <span>{dayNum}</span>
-                      {isFullyBooked ? (
-                        <span className="text-[8px] font-bold text-error uppercase leading-none">Full</span>
-                      ) : (
+                    <>
+                      {leadingDays.map((prevDay, idx) => (
                         <span
-                          className={`w-1 h-1 rounded-full mt-0.5 ${
-                            isSelected ? 'bg-white' : 'bg-emerald-500'
-                          }`}
-                        />
-                      )}
-                    </button>
+                          key={`prev-${idx}`}
+                          className="h-10 flex items-center justify-center text-xs text-outline/30 select-none"
+                        >
+                          {prevDay}
+                        </span>
+                      ))}
+
+                      {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((dayNum) => {
+                        const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+                        const iso = `${currentYear}-${pad(currentMonthIndex + 1)}-${pad(dayNum)}`;
+                        const dayDate = new Date(currentYear, currentMonthIndex, dayNum);
+                        const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const isPast = dayDate < today;
+                        const isSelectable = !isWeekend && !isPast;
+                        const isSelected = booking.selectedDateIso === iso;
+                        const dayOverview = monthOverview[iso];
+                        const isFullyBooked = isSelectable && dayOverview && dayOverview.isFullyBooked;
+
+                        if (!isSelectable) {
+                          return (
+                            <span
+                              key={dayNum}
+                              className="h-10 flex items-center justify-center text-xs text-outline/40 font-medium select-none"
+                            >
+                              {dayNum}
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <button
+                            key={dayNum}
+                            type="button"
+                            disabled={Boolean(isFullyBooked)}
+                            onClick={() => handleDateSelect(dayNum)}
+                            title={
+                              isFullyBooked
+                                ? 'Fully booked on advisory booking ledger'
+                                : `${dayOverview ? dayOverview.availableSlots : 'Open'} slots available`
+                            }
+                            className={`h-10 rounded-xl flex flex-col items-center justify-center text-sm font-semibold transition-all relative ${
+                              isFullyBooked
+                                ? 'bg-surface-container text-outline/50 cursor-not-allowed line-through'
+                                : isSelected
+                                ? 'bg-secondary text-white font-bold shadow-md shadow-secondary/20'
+                                : 'text-on-surface hover:bg-surface-container'
+                            }`}
+                          >
+                            <span>{dayNum}</span>
+                            {isFullyBooked ? (
+                              <span className="text-[8px] font-bold text-error uppercase leading-none">Full</span>
+                            ) : (
+                              <span
+                                className={`w-1 h-1 rounded-full mt-0.5 ${
+                                  isSelected ? 'bg-white' : 'bg-emerald-500'
+                                }`}
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </>
                   );
-                })}
+                })()}
               </div>
 
               {/* Time Slots */}
@@ -983,8 +1065,8 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                   <span className="font-semibold text-on-surface">₦50,000.00</span>
                 </div>
                 <div className="flex justify-between text-xs text-on-surface-variant">
-                  <span>Bachs.io Gateway Processing Fee (1.5%)</span>
-                  <span className="font-semibold text-on-surface">₦750.00</span>
+                  <span>Bachs.io Payment Gateway Fee</span>
+                  <span className="font-bold text-on-tertiary-container">INCLUDED (₦0.00)</span>
                 </div>
                 <div className="flex justify-between text-xs text-on-surface-variant">
                   <span>Platform VAT &amp; Escrow Protection</span>
@@ -994,7 +1076,7 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                 <div className="flex justify-between items-baseline">
                   <span className="text-sm font-bold text-on-surface">Total Due Now</span>
                   <div className="text-right">
-                    <span className="text-2xl font-bold text-secondary">₦50,750</span>
+                    <span className="text-2xl font-bold text-secondary">₦50,000</span>
                     <span className="text-[10px] text-on-surface-variant block">100% Credited to Sourcing Retainers</span>
                   </div>
                 </div>
@@ -1047,7 +1129,7 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
                 className="w-full min-h-[54px] py-3.5 px-6 rounded-2xl bg-secondary text-on-secondary font-bold text-base flex items-center justify-center gap-3 shadow-xl shadow-secondary/20 hover:bg-secondary-container transition-all active:scale-98 disabled:opacity-50"
               >
                 <Lock className="w-4 h-4 text-white/90" />
-                <span>Proceed to Secure Bachs.io Checkout — ₦50,750</span>
+                <span>Proceed to Secure Bachs.io Checkout — ₦50,000</span>
                 <ArrowRight className="w-5 h-5 text-white/90" />
               </button>
 
