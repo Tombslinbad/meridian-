@@ -7,6 +7,7 @@ import {
   fetchMonthOverview,
   SlotAvailability,
 } from '../services/calendarAvailability';
+import { ADVISOR_WHATSAPP_NUMBER } from '../services/googleWorkspace';
 import {
   Lock,
   ArrowLeft,
@@ -28,7 +29,8 @@ import {
   Zap,
   Smartphone,
   Coins,
-  X
+  X,
+  MessageSquare
 } from 'lucide-react';
 
 interface BookingCheckoutViewProps {
@@ -343,8 +345,10 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
     onUpdateBooking({ selectedTime: timeStr });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+    }
 
     const isValid = validateBookingDetails();
     if (!isValid) {
@@ -1090,11 +1094,34 @@ export const BookingCheckoutView: React.FC<BookingCheckoutViewProps> = ({
 
               {/* Error Message if any */}
               {paymentError && (
-                <div className="p-3.5 rounded-2xl bg-error-container/40 border border-error/30 flex items-start gap-2.5 text-xs text-error">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <div className="flex flex-col">
-                    <span className="font-bold">Payment Gateway Error</span>
-                    <span>{paymentError}</span>
+                <div className="p-4 rounded-2xl bg-error-container/40 border border-error/30 flex flex-col gap-3 text-xs text-error">
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-bold">Payment Gateway Notice</span>
+                      <span className="leading-relaxed">{paymentError}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-error/20">
+                    <button
+                      type="button"
+                      onClick={() => handleSubmit()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-error text-on-error font-medium hover:opacity-90 transition-opacity text-xs shadow-xs"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Retry Checkout</span>
+                    </button>
+                    <a
+                      href={`https://wa.me/${ADVISOR_WHATSAPP_NUMBER}?text=${encodeURIComponent(
+                        `Hello Meridian Trade Desk, I would like to confirm my China Consultation booking for ${booking.selectedDate || 'Upcoming Date'} at ${booking.selectedTime || 'Selected Time'} (Client: ${booking.fullName || 'Private Client'}, Industry: ${booking.industry || 'Commodity Trade'}). Please provide direct settlement details.`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-secondary text-on-secondary font-medium hover:opacity-90 transition-opacity text-xs shadow-xs"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Book & Settle via WhatsApp Desk</span>
+                    </a>
                   </div>
                 </div>
               )}
