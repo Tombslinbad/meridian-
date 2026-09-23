@@ -1,6 +1,229 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
-import { sendTikTokCompletePayment } from '../server/tiktokEvents';
+import crypto from 'crypto';
+
+// ============================================================================
+// TIKTOK EVENTS API (SERVER-SIDE DISPATCHER - SELF-CONTAINED)
+// ============================================================================
+export const TIKTOK_API_URL = 'https://business-api.tiktok.com/open_api/v1.3/event/track/';
+
+export const getTikTokPixelId = (): string => {
+  return (
+    process.env.TIKTOK_PIXEL_ID ||
+    process.env.VITE_TIKTOK_PIXEL_ID ||
+    'DAPHHSRC77U28JP3A930'
+  ).trim();
+};
+
+export const getTikTokAccessToken = (): string => {
+  return (process.env.TIKTOK_EVENTS_API_ACCESS_TOKEN || '').trim();
+};
+
+export interface TikTokUserData {
+  email?: string;
+  phone?: string;
+  ttclid?: string;
+  ttp?: string;
+  ip?: string;
+  userAgent?: string;
+  externalId?: string;
+}
+
+export interface TikTokEventPayload {
+  eventName: string;
+  eventId: string;
+  timestamp?: number;
+  properties?: {
+    value?: number;
+    currency?: string;
+    content_type?: string;
+    content_id?: string;
+    content_name?: string;
+    [key: string]: any;
+  };
+  user?: TikTokUserData;
+  pageUrl?: string;
+}
+
+const processedTikTokEventIds = new Set<string>();
+
+export function hashEmail(email?: string): string | undefined {
+  if (!email || typeof email !== 'string') return undefined;
+  const cleaned = email.trim().toLowerCase();
+  if (!cleaned || !cleaned.includes('@')) return undefined;
+  return crypto.createHash('sha256').update(cleaned).digest('hex');
+}
+
+export function hashPhone(phone?: string): string | undefined {
+  if (!phone || typeof phone !== 'string') return undefined;
+  const digits = phone.trim().replace(/[^\d+]/g, '');
+  if (!digits || digits.length < 5) return undefined;
+  return crypto.createHash('sha256').update(digits).digest('hex');
+}
+
+export async function sendTikTokEvent(
+  payload: TikTokEventPayload
+): Promise<{ success: boolean; code?: number; message?: string; skipped?: boolean }> {
+  const token = getTikTokAccessToken();
+  const pixelId = getTikTokPixelId();
+
+  if (!token) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(
+        `[TikTok Events API] Skipping ${payload.eventName} (TIKTOK_EVENTS_API_ACCESS_TOKEN is not configured)`
+      );
+    }
+    return { success: false, skipped: true, message: 'TIKTOK_EVENTS_API_ACCESS_TOKEN not set' };
+  }
+
+  if (processedTikTokEventIds.has(payload.eventId)) {
+    console.log(
+      `[TikTok Events API] Event ${payload.eventName} with ID ${payload.eventId} already processed; skipping (idempotent)`
+    );
+    return { success: true, skipped: true, message: 'Already processed' };
+  }
+
+  try {
+    const eventTime = payload.timestamp || Math.floor(Date.now() / 1000);
+    const userObject: Record<string, any> = {};
+
+    const hashedEmail = hashEmail(payload.user?.email);
+    if (hashedEmail) userObject.email = hashedEmail;
+
+    const hashedPhone = hashPhone(payload.user?.phone);
+    if (hashedPhone) userObject.phone = hashedPhone;
+
+    if (payload.user?.ttclid && payload.user.ttclid.trim()) {
+      userObject.ttclid = payload.user.ttclid.trim();
+    }
+    if (payload.user?.ttp && payload.user.ttp.trim()) {
+      userObject.ttp = payload.user.ttp.trim();
+    }
+    if (payload.user?.ip && payload.user.ip.trim()) {
+      userObject.ip = payload.user.ip.trim();
+    }
+    if (payload.user?.userAgent && payload.user.userAgent.trim()) {
+      userObject.user_agent = payload.user.userAgent.trim();
+    }
+    if (payload.user?.externalId) {
+      userObject.external_id = crypto
+        .createHash('sha256')
+        .update(payload.user.externalId.trim())
+        .digest('hex');
+    }
+
+    const eventData: Record<string, any> = {
+      event: payload.eventName,
+      event_time: eventTime,
+      event_id: payload.eventId,
+      user: userObject,
+      properties: {
+        value: payload.properties?.value ?? 50000,
+        currency: payload.properties?.currency ?? 'NGN',
+        content_type: payload.properties?.content_type ?? 'product',
+        content_id: payload.properties?.content_id ?? 'china-consultation-60min',
+        content_name:
+          payload.properties?.content_name ?? 'China Business Consultation (60-Min)',
+        ...payload.properties,
+      },
+    };
+
+    if (payload.pageUrl) {
+      eventData.page = { url: payload.pageUrl };
+    }
+
+    const requestBody: Record<string, any> = {
+      event_source: 'web',
+      event_source_id: pixelId,
+      data: [eventData],
+    };
+
+    const testCode = process.env.TIKTOK_TEST_EVENT_CODE?.trim();
+    if (testCode) {
+      requestBody.test_event_code = testCode;
+    }
+
+    const response = await fetch(TIKTOK_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Token': token,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const responseData = (await response.json()) as any;
+
+    if (response.ok && responseData?.code === 0) {
+      processedTikTokEventIds.add(payload.eventId);
+      console.log(
+        `[TikTok Events API] Successfully sent ${payload.eventName} for event_id=${payload.eventId}`
+      );
+      return { success: true, code: responseData.code, message: responseData.message };
+    } else {
+      console.warn(
+        `[TikTok Events API] Failed to send ${payload.eventName}:`,
+        responseData?.message || response.statusText,
+        `Code: ${responseData?.code}`
+      );
+      return {
+        success: false,
+        code: responseData?.code || response.status,
+        message: responseData?.message || response.statusText,
+      };
+    }
+  } catch (err: any) {
+    console.warn(`[TikTok Events API] Network/transport error for ${payload.eventName}:`, err?.message || err);
+    return { success: false, message: err?.message || 'Transport error' };
+  }
+}
+
+export async function sendTikTokCompletePayment(params: {
+  checkoutId: string;
+  reference?: string;
+  amount?: number;
+  currency?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  ttclid?: string;
+  ttp?: string;
+  ip?: string;
+  userAgent?: string;
+  pageUrl?: string;
+}): Promise<void> {
+  const { checkoutId } = params;
+  if (!checkoutId) return;
+
+  const eventId = checkoutId.startsWith('mca_') ? checkoutId : `mca_${checkoutId}`;
+
+  if (processedTikTokEventIds.has(eventId)) {
+    return;
+  }
+
+  await sendTikTokEvent({
+    eventName: 'CompletePayment',
+    eventId: eventId,
+    timestamp: Math.floor(Date.now() / 1000),
+    properties: {
+      value: params.amount ?? 50000,
+      currency: params.currency ?? 'NGN',
+      content_type: 'product',
+      content_id: 'china-consultation-60min',
+      content_name: 'China Business Consultation (60-Min)',
+      reference: params.reference || checkoutId,
+    },
+    user: {
+      email: params.customerEmail,
+      phone: params.customerPhone,
+      ttclid: params.ttclid,
+      ttp: params.ttp,
+      ip: params.ip,
+      userAgent: params.userAgent,
+      externalId: params.reference || checkoutId,
+    },
+    pageUrl: params.pageUrl || 'https://meridianchina.com/booking',
+  });
+}
 
 // ============================================================================
 // TIKTOK ATTRIBUTION CACHE FOR SERVER-SIDE EVENTS API
@@ -462,8 +685,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   if (queryRoute) {
     req.url = queryRoute.startsWith('/') ? queryRoute : `/${queryRoute}`;
   } else {
-    const forwardedUri = (req.headers['x-forwarded-uri'] || req.headers['x-matched-path'] || req.headers['x-invoke-path']) as string;
-    if (forwardedUri) {
+    const forwardedUri = (req.headers['x-forwarded-uri'] || req.headers['x-invoke-path']) as string;
+    if (forwardedUri && forwardedUri !== '/api' && forwardedUri !== '/api/' && forwardedUri !== '/') {
       req.url = forwardedUri;
     }
   }
